@@ -370,14 +370,31 @@ being detected, with the reason buried in the server logs.
 ### Parimutuel payouts
 
 ```
-payout = stake × (total_pool / winning_side_pool)      0% rake
+payout = max( stake × (total_pool / winning_side_pool),   0% rake
+              stake × LOLBET_HOUSE_MIN_MULTIPLIER )       house floor
 ```
 
 Stakes leave the wallet when the bet is placed, so balances can never go
 negative and the pool always matches coins actually held. Payouts are integers
 and the rounding remainder is distributed largest-remainder style, so the pool
-is conserved to the coin instead of quietly evaporating. If nobody backed the
-winning side, everyone is refunded rather than the pool being burned.
+is conserved to the coin instead of quietly evaporating.
+
+**Why the floor.** Pure parimutuel pays nothing when everyone picks the same
+side: the pot holds only the winners' own stakes and hands them straight back
+at x1.00. With nobody on the winning side there is no pot to split at all, so
+the original code refunded everyone — players got their coins back after
+losing. On a six-player server that is the normal case, not an edge case, and
+it made betting pointless.
+
+So winners are guaranteed x1.20 with the house paying any shortfall, and
+picking wrong costs the stake even when nobody called it right. The floor never
+lowers a payout: once losers have fed the pot, parimutuel takes over and pays
+far more. The odds shown before betting apply the same floor, so the number
+displayed is the one that gets paid.
+
+Coins therefore enter and leave the economy through the house rather than being
+strictly conserved across a game. Set `LOLBET_HOUSE_MIN_MULTIPLIER=1.0` to go
+back to pure parimutuel.
 
 `UNIQUE (user_id, game_id)` enforces one position per user per game — a
 double-clicked button hits the constraint, not a race.
@@ -414,6 +431,7 @@ knowing:
 | `LOLBET_DAILY_AMOUNT` | `100` | `/daily` grant |
 | `LOLBET_USE_THREADS` | `false` | `true` puts the lock notice and recap in a thread instead of the channel |
 | `LOLBET_ANNOUNCE_LOCK` | `true` | Post a message when the betting window closes |
+| `LOLBET_HOUSE_MIN_MULTIPLIER` | `1.2` | Guaranteed odds floor, paid by the house |
 | `LOLBET_BACKUP_ENABLED` | `true` | Daily SQLite snapshot into `data/backups/` |
 | `LOLBET_BACKUP_KEEP` | `7` | How many daily snapshots to keep |
 | `LOLBET_ALERT_BAD_KEY` | `true` | Post in Discord when the Riot key is refused |
