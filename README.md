@@ -123,6 +123,23 @@ journalctl -u lolbet -f
 No inbound ports are needed: the bot dials out to Discord over a websocket.
 Leave the security list closed except for SSH.
 
+### Windows, on a machine you already have
+
+No account, no card, nothing to create. A scheduled task starts the bot at
+logon, hidden, restarts it if it crashes, and logs to `data\lolbet.log`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\windows\install-autostart.ps1
+```
+
+The bot is then only up while that session is open, which matters less than it
+sounds: it needs to run when your group is playing, and they are playing on
+that machine. Tracked games are persisted, so a shutdown mid-game is not lost -
+the next start fetches the match, settles the bets and posts the recap late.
+
+`deploy\windows\uninstall-autostart.ps1` removes it and touches neither the
+database nor `.env`.
+
 ### Raspberry Pi
 
 Identical to the above — the systemd unit is already ARM-friendly and capped at
@@ -150,6 +167,19 @@ constraint. Use the Oracle Always Free VM or a Pi.
 
 [`deploy/Dockerfile`](deploy/Dockerfile) builds a slim ARM64-capable image. It
 is genuinely optional — on a Pi, systemd is less overhead.
+
+### If Oracle refuses your signup
+
+Oracle rejects account creation opaquely, most often for a VPN or proxy (their
+"concealing your location" clause), a billing address that does not match the
+bank exactly, a prepaid card, or a repeated attempt. Retry once with the VPN
+off, in a private window, with a regular card. If it still fails, do not fight
+it: the free-tier support does not answer.
+
+**Google Cloud e2-micro** is the equivalent always-free VM (`us-central1`,
+`us-west1` or `us-east1`; the US region is irrelevant here since the bot only
+calls the Riot and Discord APIs). It also wants a card, but has none of the
+ARM capacity shortages. Otherwise use the Windows task above, or a Pi.
 
 ### Backups
 
