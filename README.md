@@ -123,7 +123,9 @@ sudo -u lolbet git clone https://github.com/Gabibel/lolbet.git /opt/lolbet
 # account, so your own login cannot cd into it. A failed cd here is silent and
 # leaves the venv and .env in your home directory instead.
 sudo -u lolbet python3 -m venv /opt/lolbet/.venv
-sudo -u lolbet /opt/lolbet/.venv/bin/pip install /opt/lolbet
+# -e keeps the venv pointing at the clone instead of copying it, so that
+# `git pull` followed by a restart actually changes what runs.
+sudo -u lolbet /opt/lolbet/.venv/bin/pip install -e /opt/lolbet
 sudo -u lolbet mkdir -p /opt/lolbet/data
 
 sudo cp /opt/lolbet/.env.example /opt/lolbet/.env
