@@ -4,6 +4,11 @@ Documentation=https://github.com/Gabibel/lolbet
 After=network-online.target
 Wants=network-online.target
 
+# Give up if it crash-loops, so a bad API key does not spin forever.
+# These two are [Unit] options: systemd ignores them under [Service].
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
 [Service]
 Type=simple
 User=lolbet
@@ -15,9 +20,6 @@ ExecStart=/opt/lolbet/.venv/bin/python -m lolbet
 # The bot reconnects on its own; restart only covers a hard crash.
 Restart=on-failure
 RestartSec=10
-# Give up if it crash-loops, so a bad API key does not spin forever.
-StartLimitBurst=5
-StartLimitIntervalSec=300
 
 # Logs go to the journal: journalctl -u lolbet -f
 StandardOutput=journal
