@@ -35,7 +35,14 @@ from ..models import (
 from ..riot.client import RiotAPIError, RiotUnauthorized, build_match_id
 from ..utils import as_utc, from_epoch_ms, utcnow
 from .betting import Pool
-from .embeds import build_game_embed, build_result_embed, build_void_embed, queue_name
+from .embeds import (
+    TEAM_NAMES,
+    build_game_embed,
+    build_lock_embed,
+    build_result_embed,
+    build_void_embed,
+    queue_name,
+)
 from .enrichment import base_card, find_team_id
 from .scoring import score_match
 
@@ -362,7 +369,11 @@ class GameTracker:
             await self._drop_game(game_id)
             return
 
-        thread_id = await self._open_thread(message, card, riot_game_id)
+        thread_id = (
+            await self._open_thread(message, card, riot_game_id)
+            if bot.settings.use_threads
+            else None
+        )
 
         async with bot.session_factory() as session:
             stored = await session.get(TrackedGame, game_id)
@@ -467,6 +478,37 @@ class GameTracker:
         for game_id in to_refresh:
             log.info("tracker.locked", game_id=game_id)
             await self._bot.updater.refresh(game_id)
+            if self._bot.settings.announce_lock:
+                await self._post_lock_notice(game_id)
+
+    async def _post_lock_notice(self, game_id: int) -> None:
+        """Say in the channel that the window closed, with the final pool."""
+        bot = self._bot
+        async with bot.session_factory() as session:
+            game = await session.get(TrackedGame, game_id)
+            if game is None:
+                return
+            participants = (
+                (
+                    await session.execute(
+                        select(TrackedParticipant).where(TrackedParticipant.game_id == game_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            pool = await bot.betting.pool(session, game_id)
+            bets = await bot.betting.bets_for_game(session, game_id)
+
+        embed = build_lock_embed(
+            riot_game_id=game.riot_game_id,
+            tracked_names=[p.riot_id for p in participants] or [game.riot_game_id],
+            pool=pool,
+            bets=bets,
+            tracked_team_name=TEAM_NAMES.get(game.tracked_team_id, "The tracked team"),
+            window_seconds=bot.settings.bet_lock_seconds,
+        )
+        await self._post_followup(game_id, embed)
 
     async def _expire_stale(self) -> None:
         """Force very old live games into resolution so bets are never stuck."""
@@ -575,7 +617,7 @@ class GameTracker:
             settlement=settlement,
             ddragon=bot.ddragon,
         )
-        await self._post_recap(game_id, embed)
+        await self._post_followup(game_id, embed)
         await bot.updater.refresh(game_id)
         log.info(
             "tracker.resolved",
@@ -626,22 +668,37 @@ class GameTracker:
             riot_game_id = game.riot_game_id
 
         log.warning("tracker.voided", game=riot_game_id, refunded=settlement.pool.total)
-        await self._post_recap(game_id, build_void_embed(riot_game_id, settlement))
+        await self._post_followup(game_id, build_void_embed(riot_game_id, settlement))
         await bot.updater.refresh(game_id)
 
-    async def _post_recap(self, game_id: int, embed: discord.Embed) -> None:
+    async def _post_followup(self, game_id: int, embed: discord.Embed) -> None:
+        """Post in the game thread when there is one, else in the channel.
+
+        Without a thread the message replies to the announcement, so the two
+        stay visually linked however far the channel has scrolled.
+        """
         async with self._bot.session_factory() as session:
             game = await session.get(TrackedGame, game_id)
         if game is None:
             return
         destination = await self._bot.updater.destination(game)
         if destination is None:
-            log.warning("tracker.no_recap_destination", game=game.riot_game_id)
+            log.warning("tracker.no_destination", game=game.riot_game_id)
             return
+        reference = None if game.thread_id else self._bot.updater.reference(game)
         try:
-            await destination.send(embed=embed)
-        except (discord.Forbidden, discord.HTTPException) as exc:
-            log.warning("tracker.recap_failed", game=game.riot_game_id, error=str(exc))
+            await destination.send(embed=embed, reference=reference)
+        except discord.HTTPException as exc:
+            # A deleted announcement makes the reference invalid; resend plain.
+            log.warning("tracker.followup_retry", game=game.riot_game_id, error=str(exc))
+            try:
+                await destination.send(embed=embed)
+            except (discord.Forbidden, discord.HTTPException) as inner:
+                log.warning(
+                    "tracker.followup_failed", game=game.riot_game_id, error=str(inner)
+                )
+        except discord.Forbidden as exc:
+            log.warning("tracker.followup_failed", game=game.riot_game_id, error=str(exc))
 
     async def _housekeeping(self) -> None:
         now = utcnow()

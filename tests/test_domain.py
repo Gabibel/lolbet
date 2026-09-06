@@ -201,3 +201,56 @@ def test_format_ago_is_human():
     assert format_ago(now - timedelta(minutes=30), now=now) == "30m ago"
     assert format_ago(now - timedelta(days=2), now=now) == "2d ago"
     assert format_ago(None) == "never"
+
+
+# -- lock notice -----------------------------------------------------------
+
+
+class _FakeBet:
+    def __init__(self, user_id: int, side: str, amount: int) -> None:
+        self.user_id, self.side, self.amount = user_id, side, amount
+
+
+def test_lock_embed_lists_both_sides_and_their_bettors():
+    from lolbet.models import BetSide
+    from lolbet.services.betting import Pool
+    from lolbet.services.embeds import build_lock_embed
+
+    pool = Pool(win_amount=300, loss_amount=100, win_count=2, loss_count=1)
+    bets = [
+        _FakeBet(11, BetSide.WIN, 200),
+        _FakeBet(22, BetSide.WIN, 100),
+        _FakeBet(33, BetSide.LOSS, 100),
+    ]
+    embed = build_lock_embed(
+        riot_game_id="EUW1_1",
+        tracked_names=["Gabite#EUW"],
+        pool=pool,
+        bets=bets,
+        tracked_team_name="Blue Team",
+        window_seconds=300,
+    )
+
+    assert "Betting closed" in embed.title
+    assert "5-minute window" in embed.description
+    win_field, loss_field = embed.fields
+    assert "300" in win_field.name and "x1.33" in win_field.name
+    assert "<@11>" in win_field.value and "<@22>" in win_field.value
+    assert "<@33>" in loss_field.value
+    assert len(embed) <= 6000
+
+
+def test_lock_embed_says_nobody_when_there_were_no_bets():
+    from lolbet.services.betting import Pool
+    from lolbet.services.embeds import build_lock_embed
+
+    embed = build_lock_embed(
+        riot_game_id="EUW1_1",
+        tracked_names=["Gabite#EUW"],
+        pool=Pool(),
+        bets=[],
+        tracked_team_name="Blue Team",
+        window_seconds=300,
+    )
+    assert "Nobody bet on this one" in embed.description
+    assert all(field.value == "Nobody" for field in embed.fields)

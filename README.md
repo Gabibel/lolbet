@@ -22,9 +22,12 @@ real-money path anywhere in the code and nothing to add one to.
 3. **Bet** — *Bet WIN* / *Bet LOSS* buttons open a modal. Parimutuel pool, 0%
    rake, live implied odds on the embed. Bets lock 5 minutes after the game
    started.
-4. **Recap** — when the game ends, the match is fetched from MATCH-V5 and a
-   recap lands in the game thread: KDA, CS/min, damage, gold, vision, payouts,
-   plus MVP and worst-player awards from [`scoring.py`](src/lolbet/services/scoring.py).
+4. **Lock** — when the window closes, a message recaps the final pool and who
+   backed which side.
+5. **Recap** — when the game ends, the match is fetched from MATCH-V5 and a
+   recap is posted as a reply to the announcement: KDA, CS/min, damage, gold,
+   vision, payouts, plus MVP and worst-player awards from
+   [`scoring.py`](src/lolbet/services/scoring.py).
 
 ### Commands
 
@@ -62,9 +65,10 @@ You need two things in `.env`:
 - `LOLBET_RIOT_API_KEY` — [developer.riotgames.com](https://developer.riotgames.com/).
 
 Invite the bot with the `bot` and `applications.commands` scopes and these
-permissions: **Send Messages**, **Embed Links**, **Create Public Threads**,
-**Send Messages in Threads**. No privileged intents are required — the bot
-never reads message content.
+permissions: **Send Messages** and **Embed Links**. Add **Create Public
+Threads** and **Send Messages in Threads** only if you set
+`LOLBET_USE_THREADS=true`. No privileged intents are required — the bot never
+reads message content.
 
 Then, in your server: `/setchannel #lol-games`, and `/register YourName#TAG`.
 
@@ -144,8 +148,8 @@ is running.
                                     +3s ─► LEAGUE-V4 + SUMMONER-V4 + MASTERY-V4
                                                          └─► edit same message (phase 2)
 
-  maintenance loop ─► lock at gameStart+5min ─► edit embed to LOCKED
-                   └─► spectator 404 ─► wait 60s ─► MATCH-V5 ─► settle + recap in thread
+  maintenance loop ─► lock at gameStart+5min ─► embed to LOCKED + pool recap
+                   └─► spectator 404 ─► wait 60s ─► MATCH-V5 ─► settle + recap
 ```
 
 ### Rate limiting is the design constraint
@@ -250,6 +254,8 @@ knowing:
 | `LOLBET_BET_LOCK_SECONDS` | `300` | After `gameStartTime` |
 | `LOLBET_STARTING_BALANCE` | `1000` | Coins for a new wallet |
 | `LOLBET_DAILY_AMOUNT` | `100` | `/daily` grant |
+| `LOLBET_USE_THREADS` | `false` | `true` puts the lock notice and recap in a thread instead of the channel |
+| `LOLBET_ANNOUNCE_LOCK` | `true` | Post a message when the betting window closes |
 | `LOLBET_DEV_GUILD_ID` | unset | Set it for instant slash-command sync while developing |
 
 ---

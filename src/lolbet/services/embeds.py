@@ -374,6 +374,52 @@ def _payout_value(settlement: Settlement) -> str:
     return "\n".join(lines)[:1024]
 
 
+def build_lock_embed(
+    *,
+    riot_game_id: str,
+    tracked_names: list[str],
+    pool: Pool,
+    bets: list,
+    tracked_team_name: str,
+    window_seconds: int,
+) -> discord.Embed:
+    """Posted in the channel when the betting window closes.
+
+    The announcement embed already flips to LOCKED, but that is an edit far up
+    the channel; this is the message people actually notice.
+    """
+    names = ", ".join(discord.utils.escape_markdown(name) for name in tracked_names)
+    embed = discord.Embed(
+        title=f"{EMOJI_LOCK} Betting closed - {names}"[:256],
+        colour=COLOUR_LOCKED,
+        description=(
+            f"The {window_seconds // 60}-minute window is over. Final pool:"
+            if pool.count
+            else f"The {window_seconds // 60}-minute window is over. Nobody bet on this one."
+        ),
+    )
+
+    for side, label, emoji in (
+        (BetSide.WIN, f"{tracked_team_name} wins", EMOJI_TROPHY),
+        (BetSide.LOSS, f"{tracked_team_name} loses", EMOJI_DEFEAT),
+    ):
+        amount = pool.win_amount if side == BetSide.WIN else pool.loss_amount
+        side_bets = [bet for bet in bets if bet.side == side]
+        multiplier = pool.multiplier(side)
+        odds = f" - pays x{multiplier:.2f}" if multiplier else ""
+        lines = [f"<@{bet.user_id}> {bet.amount:,}" for bet in side_bets[:10]]
+        if len(side_bets) > 10:
+            lines.append(f"...and {len(side_bets) - 10} more")
+        embed.add_field(
+            name=f"{emoji} {label} - {amount:,} coins{odds}",
+            value="\n".join(lines) if lines else "Nobody",
+            inline=True,
+        )
+
+    embed.set_footer(text=f"{riot_game_id} - virtual coins only")
+    return embed
+
+
 def build_void_embed(riot_game_id: str, refunded: Settlement | None) -> discord.Embed:
     embed = discord.Embed(
         title="\N{WARNING SIGN} Game could not be resolved",

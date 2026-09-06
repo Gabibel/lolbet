@@ -148,6 +148,18 @@ class MessageUpdater:
             return None
         return channel.get_partial_message(game.message_id)  # type: ignore[union-attr]
 
+    def reference(self, game: TrackedGame) -> discord.MessageReference | None:
+        """Reply-to pointer at the announcement, so follow-ups stay attached."""
+        if not game.channel_id or not game.message_id:
+            return None
+        return discord.MessageReference(
+            message_id=game.message_id,
+            channel_id=game.channel_id,
+            guild_id=game.guild_id,
+            # The announcement may have been deleted; do not fail the send.
+            fail_if_not_exists=False,
+        )
+
     async def destination(self, game: TrackedGame) -> discord.abc.Messageable | None:
         """Where the recap goes: the game thread, else the announce channel."""
         if game.thread_id:

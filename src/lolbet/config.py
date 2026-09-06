@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     max_bet: int = Field(default=100_000, ge=1)
     embed_edit_debounce_seconds: float = Field(default=2.5, ge=0)
 
+    # Where the lock notice and the recap go. False keeps everything in the
+    # announcement channel as replies; True tucks them into a thread instead.
+    use_threads: bool = False
+    announce_lock: bool = True
+
     # Logging
     log_level: str = "INFO"
     log_json: bool = False

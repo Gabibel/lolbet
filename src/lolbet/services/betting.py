@@ -184,6 +184,12 @@ class BettingService:
             loss_count=loss_count,
         )
 
+    async def bets_for_game(self, session: AsyncSession, game_id: int) -> list[Bet]:
+        result = await session.execute(
+            select(Bet).where(Bet.game_id == game_id).order_by(Bet.amount.desc())
+        )
+        return list(result.scalars().all())
+
     async def get_bet(
         self, session: AsyncSession, game_id: int, user_id: int
     ) -> Bet | None:
