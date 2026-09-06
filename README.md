@@ -49,6 +49,9 @@ real-money path anywhere in the code and nothing to add one to.
 | `/quotidien` | anyone | +100 coins every 24h |
 | `/paris` | anyone | Your open positions |
 | `/annulerpari [game]` | anyone | Cancel a bet before the lock |
+| `/inscrits` | anyone | List everyone tracked on this server |
+| `/inscrire-joueur <member> <RiotID#TAG>` | Manage Server | Link someone else's account |
+| `/desinscrire-joueur <member>` | Manage Server | Stop tracking someone else |
 | `/salon [channel]` | Manage Server | Where games are announced |
 | `/statut` | Manage Server | Rate-limit, cache and tracker diagnostics |
 
@@ -79,6 +82,10 @@ Threads** and **Send Messages in Threads** only if you set
 reads message content.
 
 Then, in your server: `/salon #lol-games`, and `/inscription YourName#TAG`.
+
+One Discord account tracks one LoL account: registering again replaces the
+previous link. Everyone registers themselves, or a server manager does it for
+them with `/inscrire-joueur @member RiotID#TAG`.
 
 Slash commands sync globally, which Discord can take up to an hour to
 propagate. Set `LOLBET_DEV_GUILD_ID` to your server id for instant sync while

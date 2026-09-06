@@ -1,4 +1,4 @@
-"""/inscription, /desinscription, /profil, /classement."""
+"""/inscription, /desinscription, /profil, /classement, et les variantes admin."""
 
 from __future__ import annotations
 
@@ -7,31 +7,32 @@ from typing import TYPE_CHECKING
 import discord
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import select
 
 from ..config import VALID_PLATFORMS
 from ..logging_conf import get_logger
-from ..models import Player
-from ..riot.client import RiotAPIError, RiotUnauthorized, normalise_platform
+from ..riot.client import RiotAPIError, RiotUnauthorized
 from ..riot.rank import UNRANKED_LABEL, solo_queue_rank
-from ..utils import format_coins, utcnow
+from ..services.registration import (
+    LinkResult,
+    RegistrationError,
+    link_account,
+    linked_players,
+    unlink_account,
+)
+from ..utils import format_coins
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..bot import LoLBet
 
 log = get_logger(__name__)
 
-
-def split_riot_id(raw: str) -> tuple[str, str] | None:
-    """``Faker#KR1`` -> ``("Faker", "KR1")``. None si ce n'est pas un Riot ID."""
-    text = (raw or "").strip()
-    if "#" not in text:
-        return None
-    name, _, tag = text.rpartition("#")
-    name, tag = name.strip(), tag.strip()
-    if not name or not tag or len(name) > 16 or len(tag) > 5:
-        return None
-    return name, tag
+BAD_KEY_MESSAGE = (
+    "La clé API Riot est expirée ou invalide, je ne peux chercher personne.\n"
+    "Propriétaire du serveur : régénère-la sur <https://developer.riotgames.com/>, "
+    "mets-la dans `.env` sous `LOLBET_RIOT_API_KEY`, puis redémarre le bot. "
+    "Les clés de développement expirent toutes les 24 heures."
+)
+RIOT_DOWN_MESSAGE = "Riot n'a pas répondu. Réessaie dans un instant."
 
 
 class Registration(commands.Cog):
@@ -48,6 +49,44 @@ class Registration(commands.Cog):
             if current in platform
         ][:25]
 
+    async def _link(
+        self,
+        interaction: discord.Interaction,
+        *,
+        discord_id: int,
+        riot_id: str,
+        region: str | None,
+    ) -> LinkResult | None:
+        """Fait le lien et répond en cas d'échec. None = déjà répondu."""
+        try:
+            async with self.bot.session_factory() as session:
+                result = await link_account(
+                    session,
+                    self.bot.riot,
+                    self.bot.betting,
+                    guild_id=interaction.guild_id or 0,
+                    discord_id=discord_id,
+                    riot_id=riot_id,
+                    region=region,
+                    default_platform=self.bot.settings.default_platform,
+                )
+                await session.commit()
+        except RegistrationError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return None
+        except RiotUnauthorized as exc:
+            # Réessayer ne servira à rien : la clé est expirée ou invalide.
+            log.error("register.bad_api_key", error=str(exc))
+            await interaction.followup.send(BAD_KEY_MESSAGE, ephemeral=True)
+            return None
+        except RiotAPIError as exc:
+            log.warning("register.api_error", error=str(exc))
+            await interaction.followup.send(RIOT_DOWN_MESSAGE, ephemeral=True)
+            return None
+        return result
+
+    # -- inscription de soi-même ------------------------------------------
+
     @app_commands.command(
         name="inscription",
         description="Lie ton Riot ID pour que tes parties soient suivies ici.",
@@ -61,106 +100,18 @@ class Registration(commands.Cog):
     async def register(
         self, interaction: discord.Interaction, riot_id: str, region: str | None = None
     ) -> None:
-        parts = split_riot_id(riot_id)
-        if parts is None:
-            await interaction.response.send_message(
-                "Ça ne ressemble pas à un Riot ID. Utilise la forme `Pseudo#TAG`, "
-                "par exemple `Faker#KR1`.",
-                ephemeral=True,
-            )
-            return
-        game_name, tag_line = parts
-        platform = normalise_platform(region, self.bot.settings.default_platform)
-        guild_id = interaction.guild_id or 0
-
         await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            account = await self.bot.riot.get_account_by_riot_id(game_name, tag_line, platform)
-        except RiotUnauthorized as exc:
-            # Réessayer ne servira à rien : la clé est expirée ou invalide.
-            log.error("register.bad_api_key", error=str(exc))
-            await interaction.followup.send(
-                "La clé API Riot est expirée ou invalide, je ne peux chercher personne.\n"
-                "Propriétaire du serveur : régénère-la sur "
-                "<https://developer.riotgames.com/>, mets-la dans `.env` sous "
-                "`LOLBET_RIOT_API_KEY`, puis redémarre le bot. "
-                "Les clés de développement expirent toutes les 24 heures.",
-                ephemeral=True,
-            )
-            return
-        except RiotAPIError as exc:
-            log.warning("register.api_error", error=str(exc))
-            await interaction.followup.send(
-                "Riot n'a pas répondu. Réessaie dans un instant.", ephemeral=True
-            )
+        result = await self._link(
+            interaction, discord_id=interaction.user.id, riot_id=riot_id, region=region
+        )
+        if result is None:
             return
 
-        if not account or not account.get("puuid"):
-            await interaction.followup.send(
-                f"Aucun compte **{game_name}#{tag_line}** sur `{platform}`. "
-                "Vérifie l'orthographe et la région.",
-                ephemeral=True,
-            )
-            return
-
-        puuid = str(account["puuid"])
-        resolved_name = str(account.get("gameName") or game_name)
-        resolved_tag = str(account.get("tagLine") or tag_line)
-
-        async with self.bot.session_factory() as session:
-            taken = (
-                await session.execute(
-                    select(Player).where(
-                        Player.guild_id == guild_id,
-                        Player.puuid == puuid,
-                        Player.discord_id != interaction.user.id,
-                    )
-                )
-            ).scalar_one_or_none()
-            if taken is not None:
-                await interaction.followup.send(
-                    f"**{resolved_name}#{resolved_tag}** est déjà enregistré ici par "
-                    f"<@{taken.discord_id}>.",
-                    ephemeral=True,
-                )
-                return
-
-            existing = (
-                await session.execute(
-                    select(Player).where(
-                        Player.guild_id == guild_id, Player.discord_id == interaction.user.id
-                    )
-                )
-            ).scalar_one_or_none()
-
-            if existing is None:
-                session.add(
-                    Player(
-                        guild_id=guild_id,
-                        discord_id=interaction.user.id,
-                        puuid=puuid,
-                        game_name=resolved_name,
-                        tag_line=resolved_tag,
-                        platform=platform,
-                    )
-                )
-                verb = "Inscrit"
-            else:
-                existing.puuid = puuid
-                existing.game_name = resolved_name
-                existing.tag_line = resolved_tag
-                existing.platform = platform
-                existing.riot_id_refreshed_at = utcnow()
-                session.add(existing)
-                verb = "Mis à jour"
-
-            wallet = await self.bot.betting.get_wallet(session, guild_id, interaction.user.id)
-            await session.commit()
-
+        verb = "Inscrit" if result.created else "Mis à jour"
         await interaction.followup.send(
-            f"{verb} : **{resolved_name}#{resolved_tag}** sur `{platform}`.\n"
+            f"{verb} : **{result.riot_id}** sur `{result.platform}`.\n"
             f"Tes parties seront annoncées ici. Solde : "
-            f"**{format_coins(wallet.balance)}** pièces.",
+            f"**{format_coins(result.balance)}** pièces.",
             ephemeral=True,
         )
 
@@ -170,27 +121,128 @@ class Registration(commands.Cog):
     @app_commands.guild_only()
     async def unregister(self, interaction: discord.Interaction) -> None:
         async with self.bot.session_factory() as session:
-            player = (
-                await session.execute(
-                    select(Player).where(
-                        Player.guild_id == (interaction.guild_id or 0),
-                        Player.discord_id == interaction.user.id,
-                    )
-                )
-            ).scalar_one_or_none()
-            if player is None:
-                await interaction.response.send_message(
-                    "Tu n'es pas inscrit ici.", ephemeral=True
-                )
-                return
-            riot_id = player.riot_id
-            await session.delete(player)
+            riot_id = await unlink_account(
+                session, interaction.guild_id or 0, interaction.user.id
+            )
             await session.commit()
 
+        if riot_id is None:
+            await interaction.response.send_message(
+                "Tu n'es pas inscrit ici.", ephemeral=True
+            )
+            return
         await interaction.response.send_message(
             f"**{riot_id}** n'est plus suivi. Tes pièces et ton historique restent en place.",
             ephemeral=True,
         )
+
+    # -- inscription de quelqu'un d'autre (admin) --------------------------
+
+    @app_commands.command(
+        name="inscrire-joueur",
+        description="Inscris le compte LoL d'un autre membre du serveur.",
+    )
+    @app_commands.describe(
+        membre="Le membre Discord à qui appartient le compte",
+        riot_id="Son Riot ID, par exemple Faker#KR1",
+        region="Plateforme, par exemple euw1. Par défaut celle du serveur.",
+    )
+    @app_commands.autocomplete(region=platform_autocomplete)
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.guild_only()
+    async def register_player(
+        self,
+        interaction: discord.Interaction,
+        membre: discord.User,
+        riot_id: str,
+        region: str | None = None,
+    ) -> None:
+        if membre.bot:
+            await interaction.response.send_message(
+                "Un bot ne joue pas à League of Legends.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        result = await self._link(
+            interaction, discord_id=membre.id, riot_id=riot_id, region=region
+        )
+        if result is None:
+            return
+
+        verb = "Inscrit" if result.created else "Mis à jour"
+        note = (
+            ""
+            if result.created
+            else "\n\N{WARNING SIGN} Ce membre avait déjà un compte lié, il a été remplacé."
+        )
+        log.info(
+            "register.by_admin",
+            guild=interaction.guild_id,
+            admin=interaction.user.id,
+            target=membre.id,
+        )
+        await interaction.followup.send(
+            f"{verb} : **{result.riot_id}** sur `{result.platform}` pour "
+            f"{membre.mention}.\nSolde : **{format_coins(result.balance)}** pièces."
+            f"{note}\nPense à le prévenir : ses parties seront annoncées publiquement.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="desinscrire-joueur",
+        description="Retire le suivi du compte LoL d'un autre membre.",
+    )
+    @app_commands.describe(membre="Le membre à ne plus suivre")
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.guild_only()
+    async def unregister_player(
+        self, interaction: discord.Interaction, membre: discord.User
+    ) -> None:
+        async with self.bot.session_factory() as session:
+            riot_id = await unlink_account(session, interaction.guild_id or 0, membre.id)
+            await session.commit()
+
+        if riot_id is None:
+            await interaction.response.send_message(
+                f"{membre.mention} n'a aucun compte lié ici.", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            f"**{riot_id}** n'est plus suivi pour {membre.mention}. "
+            "Ses pièces et son historique restent en place.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="inscrits", description="Liste les joueurs suivis sur ce serveur."
+    )
+    @app_commands.guild_only()
+    async def registered(self, interaction: discord.Interaction) -> None:
+        async with self.bot.session_factory() as session:
+            players = await linked_players(session, interaction.guild_id or 0)
+
+        if not players:
+            await interaction.response.send_message(
+                "Personne n'est inscrit. Utilise `/inscription`.", ephemeral=True
+            )
+            return
+
+        lines = [
+            f"<@{p.discord_id}> - **{discord.utils.escape_markdown(p.riot_id)}** "
+            f"(`{p.platform}`)"
+            for p in players
+        ]
+        embed = discord.Embed(
+            title=f"Joueurs suivis ({len(players)})",
+            description="\n".join(lines)[:4096],
+            colour=discord.Colour(0x5865F2),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    # -- consultation ------------------------------------------------------
 
     @app_commands.command(
         name="profil", description="Affiche un joueur inscrit, son rang et ses pièces."
@@ -204,13 +256,8 @@ class Registration(commands.Cog):
         guild_id = interaction.guild_id or 0
 
         async with self.bot.session_factory() as session:
-            player = (
-                await session.execute(
-                    select(Player).where(
-                        Player.guild_id == guild_id, Player.discord_id == target.id
-                    )
-                )
-            ).scalar_one_or_none()
+            players = await linked_players(session, guild_id)
+            player = next((p for p in players if p.discord_id == target.id), None)
             wallet = await self.bot.betting.get_wallet(
                 session, guild_id, target.id, create=False
             )
@@ -268,11 +315,7 @@ class Registration(commands.Cog):
             wallets = await self.bot.betting.leaderboard(session, guild_id, limit=10)
             registered = {
                 player.discord_id: player.riot_id
-                for player in (
-                    await session.execute(select(Player).where(Player.guild_id == guild_id))
-                )
-                .scalars()
-                .all()
+                for player in await linked_players(session, guild_id)
             }
 
         if not wallets:
@@ -299,6 +342,18 @@ class Registration(commands.Cog):
         )
         embed.set_footer(text="Pièces virtuelles uniquement.")
         await interaction.response.send_message(embed=embed)
+
+    async def cog_app_command_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ) -> None:
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message(
+                "Cette commande est réservée aux gestionnaires du serveur.", ephemeral=True
+            )
+            return
+        log.exception("registration.command_failed", error=str(error))
+        if not interaction.response.is_done():
+            await interaction.response.send_message("Ça n'a pas fonctionné.", ephemeral=True)
 
 
 async def setup(bot: LoLBet) -> None:
