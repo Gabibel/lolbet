@@ -26,6 +26,24 @@ THREAD_PERMISSIONS = {
 }
 
 
+def missing_permissions(
+    channel: discord.TextChannel | None,
+    me: discord.Member | None,
+    *,
+    with_threads: bool,
+) -> list[str] | None:
+    """Permissions manquantes pour annoncer. None = impossible a verifier."""
+    if channel is None or me is None:
+        return None
+    needed = dict(BASE_PERMISSIONS)
+    if with_threads:
+        needed |= THREAD_PERMISSIONS
+    permissions = channel.permissions_for(me)
+    return [
+        label for name, label in needed.items() if not getattr(permissions, name, False)
+    ]
+
+
 class Admin(commands.Cog):
     def __init__(self, bot: LoLBet) -> None:
         self.bot = bot
@@ -49,17 +67,12 @@ class Admin(commands.Cog):
             )
             return
 
-        needed = dict(BASE_PERMISSIONS)
-        if self.bot.settings.use_threads:
-            needed |= THREAD_PERMISSIONS
-
-        me = target.guild.me
-        permissions = target.permissions_for(me) if me else None
-        missing = [
-            label
-            for name, label in needed.items()
-            if permissions is not None and not getattr(permissions, name, False)
-        ]
+        missing = (
+            missing_permissions(
+                target, target.guild.me, with_threads=self.bot.settings.use_threads
+            )
+            or []
+        )
 
         async with self.bot.session_factory() as session:
             config = await session.get(GuildConfig, interaction.guild_id or 0)
@@ -114,11 +127,31 @@ class Admin(commands.Cog):
             config = await session.get(GuildConfig, guild_id)
 
         snapshot = self.bot.limiter.snapshot()
-        channel = (
-            f"<#{config.announce_channel_id}>"
-            if config and config.announce_channel_id
-            else "non défini - lance `/salon`"
-        )
+
+        channel_id = config.announce_channel_id if config else None
+        if not channel_id:
+            channel = "non défini - lance `/salon`"
+        else:
+            target = self.bot.get_channel(channel_id)
+            guild = interaction.guild
+            missing = missing_permissions(
+                target if isinstance(target, discord.TextChannel) else None,
+                guild.me if guild else None,
+                with_threads=self.bot.settings.use_threads,
+            )
+            if target is None:
+                verdict = "\N{CROSS MARK} salon introuvable ou invisible pour moi"
+            elif missing is None:
+                verdict = "\N{WARNING SIGN} permissions non vérifiables"
+            elif missing:
+                # C'est la panne la plus silencieuse qui soit : le bot detecte
+                # les parties, mais Discord refuse chaque annonce.
+                verdict = "\N{CROSS MARK} il me manque " + ", ".join(
+                    f"**{label}**" for label in missing
+                )
+            else:
+                verdict = "\N{WHITE HEAVY CHECK MARK} je peux y poster"
+            channel = f"<#{channel_id}>\n{verdict}"
 
         embed = discord.Embed(title="Statut de LoLBet", colour=discord.Colour(0x5865F2))
         embed.add_field(name="Salon d'annonce", value=channel, inline=False)
