@@ -48,7 +48,7 @@ Betting itself happens on the buttons attached to each announcement.
 ## Quick start
 
 ```bash
-git clone <your-fork> lolbet && cd lolbet
+git clone https://github.com/Gabibel/lolbet.git && cd lolbet
 python3.12 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env   # then fill in the two secrets
@@ -89,7 +89,7 @@ with no card charge — far more than this bot needs. Create an
 
 ```bash
 sudo adduser --system --group --home /opt/lolbet lolbet
-sudo -u lolbet git clone <your-fork> /opt/lolbet
+sudo -u lolbet git clone https://github.com/Gabibel/lolbet.git /opt/lolbet
 cd /opt/lolbet
 sudo -u lolbet python3 -m venv .venv
 sudo -u lolbet .venv/bin/pip install .

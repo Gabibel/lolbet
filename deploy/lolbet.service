@@ -1,6 +1,6 @@
 [Unit]
 Description=LoLBet - League of Legends tracker and virtual betting bot
-Documentation=https://github.com/your-name/lolbet
+Documentation=https://github.com/Gabibel/lolbet
 After=network-online.target
 Wants=network-online.target
 
