@@ -24,8 +24,12 @@ from ..models import Bet, BetSide, GameStatus, TrackedGame, Wallet
 from ..utils import as_utc, utcnow
 
 
+def _side_label(side: str) -> str:
+    return {"WIN": "VICTOIRE", "LOSS": "DÉFAITE"}.get(side, side)
+
+
 class BettingError(Exception):
-    """Anything the user did wrong, phrased so it can be shown as-is."""
+    """Erreur de l'utilisateur, formulée pour être affichée telle quelle."""
 
 
 class BetsClosed(BettingError):
@@ -216,25 +220,27 @@ class BettingService:
         amount: int,
     ) -> tuple[Bet, Wallet]:
         if not self.is_open(game):
-            raise BetsClosed("Betting is closed for this game.")
+            raise BetsClosed("Les paris sont fermés pour cette partie.")
         if side not in (BetSide.WIN, BetSide.LOSS):
-            raise InvalidAmount("Pick either WIN or LOSS.")
+            raise InvalidAmount("Choisis VICTOIRE ou DÉFAITE.")
         if amount < self._settings.min_bet:
-            raise InvalidAmount(f"Minimum bet is {self._settings.min_bet} coins.")
+            raise InvalidAmount(f"Le pari minimum est de {self._settings.min_bet} pièces.")
         if amount > self._settings.max_bet:
-            raise InvalidAmount(f"Maximum bet is {self._settings.max_bet:,} coins.")
+            raise InvalidAmount(f"Le pari maximum est de {self._settings.max_bet:,} pièces.")
 
         existing = await self.get_bet(session, int(game.id or 0), user_id)
         if existing is not None:
             raise DuplicateBet(
-                f"You already have {existing.amount:,} coins on **{existing.side}**. "
-                "Use `/cancelbet` first if you want to change it."
+                f"Tu as déjà {existing.amount:,} pièces sur "
+                f"**{_side_label(existing.side)}**. Utilise `/annulerpari` "
+                "si tu veux changer."
             )
 
         wallet = await self.get_wallet(session, game.guild_id, user_id)
         if wallet.balance < amount:
             raise InsufficientFunds(
-                f"You only have {wallet.balance:,} coins. Try `/daily` for a top-up."
+                f"Tu n'as que {wallet.balance:,} pièces. "
+                "Essaie `/quotidien` pour te renflouer."
             )
 
         # Stake leaves the wallet now, so balances can never go negative and
@@ -255,17 +261,17 @@ class BettingService:
         except IntegrityError as exc:
             # The UNIQUE (user_id, game_id) constraint caught a double click.
             await session.rollback()
-            raise DuplicateBet("You already have a bet on this game.") from exc
+            raise DuplicateBet("Tu as déjà un pari sur cette partie.") from exc
         return bet, wallet
 
     async def cancel_bet(
         self, session: AsyncSession, game: TrackedGame, user_id: int
     ) -> tuple[Bet, Wallet]:
         if not self.is_open(game):
-            raise BetsClosed("Bets are locked; this one has to ride.")
+            raise BetsClosed("Les paris sont verrouillés, celui-là part avec toi.")
         bet = await self.get_bet(session, int(game.id or 0), user_id)
         if bet is None:
-            raise BetNotFound("You have no bet on this game.")
+            raise BetNotFound("Tu n'as aucun pari sur cette partie.")
         wallet = await self.get_wallet(session, game.guild_id, user_id)
         wallet.balance += bet.amount
         wallet.total_wagered = max(0, wallet.total_wagered - bet.amount)

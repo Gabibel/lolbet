@@ -38,18 +38,20 @@ def test_master_and_above_share_one_lp_pool():
 def test_short_and_display_forms():
     diamond = RankInfo("RANKED_SOLO_5x5", "DIAMOND", "IV", 32, wins=10, losses=10)
     assert diamond.short == "D4 32LP"
-    assert "Diamond IV" in diamond.display
+    assert "Diamant IV" in diamond.display
     assert "50%" in diamond.display
 
     master = RankInfo("RANKED_SOLO_5x5", "MASTER", "I", 300)
     assert master.short == "M 300LP"
-    assert "Master" in master.display
+    assert "Maître" in master.display
 
 
 def test_score_to_label_round_trips():
+    """Les paliers viennent de l'API en anglais, l'affichage est en français."""
+    expected = {"GOLD": "Or", "EMERALD": "Émeraude", "IRON": "Fer"}
     for tier, division in (("GOLD", "II"), ("EMERALD", "IV"), ("IRON", "I")):
         rank = RankInfo("RANKED_SOLO_5x5", tier, division, 50)
-        assert score_to_label(rank.score) == f"{tier.title()} {division}"
+        assert score_to_label(rank.score) == f"{expected[tier]} {division}"
 
 
 def test_solo_queue_is_preferred_over_flex():
@@ -231,8 +233,8 @@ def test_lock_embed_lists_both_sides_and_their_bettors():
         window_seconds=300,
     )
 
-    assert "Betting closed" in embed.title
-    assert "5-minute window" in embed.description
+    assert "Paris fermés" in embed.title
+    assert "5 minutes" in embed.description
     win_field, loss_field = embed.fields
     assert "300" in win_field.name and "x1.33" in win_field.name
     assert "<@11>" in win_field.value and "<@22>" in win_field.value
@@ -252,5 +254,5 @@ def test_lock_embed_says_nobody_when_there_were_no_bets():
         tracked_team_name="Blue Team",
         window_seconds=300,
     )
-    assert "Nobody bet on this one" in embed.description
-    assert all(field.value == "Nobody" for field in embed.fields)
+    assert "Personne n'a parié" in embed.description
+    assert all(field.value == "Personne" for field in embed.fields)

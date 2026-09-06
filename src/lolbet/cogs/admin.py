@@ -1,4 +1,4 @@
-"""/setchannel and /lolbet-status - guild administrator only."""
+"""/salon et /statut - réservés aux gestionnaires du serveur."""
 
 from __future__ import annotations
 
@@ -18,15 +18,22 @@ if TYPE_CHECKING:  # pragma: no cover
 
 log = get_logger(__name__)
 
-REQUIRED_PERMISSIONS = ("send_messages", "embed_links", "create_public_threads")
+# Les fils ne sont nécessaires que si LOLBET_USE_THREADS est activé.
+BASE_PERMISSIONS = {"send_messages": "Envoyer des messages", "embed_links": "Intégrer des liens"}
+THREAD_PERMISSIONS = {
+    "create_public_threads": "Créer des fils publics",
+    "send_messages_in_threads": "Envoyer des messages dans les fils",
+}
 
 
 class Admin(commands.Cog):
     def __init__(self, bot: LoLBet) -> None:
         self.bot = bot
 
-    @app_commands.command(description="Choose where live games get announced.")
-    @app_commands.describe(channel="Text channel for announcements. Omit to use this one.")
+    @app_commands.command(
+        name="salon", description="Choisis où les parties en cours sont annoncées."
+    )
+    @app_commands.describe(channel="Salon textuel pour les annonces. Vide = le salon actuel.")
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.checks.has_permissions(manage_guild=True)
     @app_commands.guild_only()
@@ -38,15 +45,19 @@ class Admin(commands.Cog):
         target = channel or interaction.channel
         if not isinstance(target, discord.TextChannel):
             await interaction.response.send_message(
-                "Pick a normal text channel.", ephemeral=True
+                "Choisis un salon textuel classique.", ephemeral=True
             )
             return
+
+        needed = dict(BASE_PERMISSIONS)
+        if self.bot.settings.use_threads:
+            needed |= THREAD_PERMISSIONS
 
         me = target.guild.me
         permissions = target.permissions_for(me) if me else None
         missing = [
-            name
-            for name in REQUIRED_PERMISSIONS
+            label
+            for name, label in needed.items()
             if permissions is not None and not getattr(permissions, name, False)
         ]
 
@@ -62,16 +73,16 @@ class Admin(commands.Cog):
         note = ""
         if missing:
             note = (
-                "\n\N{WARNING SIGN} I am missing "
-                + ", ".join(f"`{name}`" for name in missing)
-                + " there. Announcements or threads may fail."
+                "\n\N{WARNING SIGN} Il me manque "
+                + ", ".join(f"**{label}**" for label in missing)
+                + " dans ce salon. Les annonces risquent d'échouer."
             )
         await interaction.response.send_message(
-            f"Live games will be announced in {target.mention}.{note}", ephemeral=True
+            f"Les parties seront annoncées dans {target.mention}.{note}", ephemeral=True
         )
 
     @app_commands.command(
-        name="lolbet-status", description="Tracker, cache and rate-limit diagnostics."
+        name="statut", description="Diagnostic du suivi, du cache et des limites Riot."
     )
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -106,23 +117,26 @@ class Admin(commands.Cog):
         channel = (
             f"<#{config.announce_channel_id}>"
             if config and config.announce_channel_id
-            else "not set - run `/setchannel`"
+            else "non défini - lance `/salon`"
         )
 
-        embed = discord.Embed(title="LoLBet status", colour=discord.Colour(0x5865F2))
-        embed.add_field(name="Announce channel", value=channel, inline=False)
-        embed.add_field(name="Registered players", value=str(registered))
-        embed.add_field(name="Live games", value=str(live))
-        embed.add_field(name="Awaiting results", value=str(pending))
+        embed = discord.Embed(title="Statut de LoLBet", colour=discord.Colour(0x5865F2))
+        embed.add_field(name="Salon d'annonce", value=channel, inline=False)
+        embed.add_field(name="Joueurs inscrits", value=str(registered))
+        embed.add_field(name="Parties en cours", value=str(live))
+        embed.add_field(name="Résultats attendus", value=str(pending))
         embed.add_field(
-            name="Riot rate limit",
-            value="\n".join(f"{key}: {value}" for key, value in snapshot.items()),
+            name="Limite de requêtes Riot",
+            value="\n".join(f"{key} : {value}" for key, value in snapshot.items()),
             inline=False,
         )
-        embed.add_field(name="Cache entries", value=str(self.bot.cache.size))
+        embed.add_field(name="Entrées en cache", value=str(self.bot.cache.size))
         embed.add_field(name="DDragon", value=self.bot.ddragon.version)
         embed.set_footer(
-            text=f"Poll every {self.bot.settings.poll_interval_seconds}s - SQLite on local disk"
+            text=(
+                f"Sondage toutes les {self.bot.settings.poll_interval_seconds}s "
+                "- SQLite sur disque local"
+            )
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -131,12 +145,12 @@ class Admin(commands.Cog):
     ) -> None:
         if isinstance(error, app_commands.MissingPermissions):
             await interaction.response.send_message(
-                "That one is for server managers only.", ephemeral=True
+                "Cette commande est réservée aux gestionnaires du serveur.", ephemeral=True
             )
             return
         log.exception("admin.command_failed", error=str(error))
         if not interaction.response.is_done():
-            await interaction.response.send_message("That did not work.", ephemeral=True)
+            await interaction.response.send_message("Ça n'a pas fonctionné.", ephemeral=True)
 
 
 async def setup(bot: LoLBet) -> None:

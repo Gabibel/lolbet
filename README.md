@@ -2,7 +2,11 @@
 
 A Discord bot that watches registered players' League of Legends games, opens a
 virtual betting market the moment a game goes live, and posts a results recap
-with MVP and worst-player awards when it ends.
+with MVP and worst-player awards when it ends, plus a line of banter aimed
+at whoever just fed.
+
+**The bot speaks French.** Command names, embeds and error messages are all
+in French; the code, comments and this README are in English.
 
 **Free forever, by construction.** No paid services, no expiring trials, no
 managed database. SQLite on local disk, self-hosted on an
@@ -16,7 +20,7 @@ real-money path anywhere in the code and nothing to add one to.
 
 ## What it does
 
-1. **Register** — `/register Faker#KR1 kr` links a Riot ID to a Discord user.
+1. **Register** — `/inscription Faker#KR1 kr` links a Riot ID to a Discord user.
 2. **Detect** — the tracker polls SPECTATOR-V5 for every registered PUUID and
    posts one embed per game (even if five registered users are in it together).
 3. **Bet** — *Bet WIN* / *Bet LOSS* buttons open a modal. Parimutuel pool, 0%
@@ -28,21 +32,24 @@ real-money path anywhere in the code and nothing to add one to.
    recap is posted as a reply to the announcement: KDA, CS/min, damage, gold,
    vision, payouts, plus MVP and worst-player awards from
    [`scoring.py`](src/lolbet/services/scoring.py).
+6. **Roast** — the recap is introduced by a line picked from
+   [`taunts.py`](src/lolbet/services/taunts.py) based on how the tracked
+   players actually did, and the game LVP gets sent to jail.
 
 ### Commands
 
 | Command | Who | What |
 | --- | --- | --- |
-| `/register <RiotID#TAG> [region]` | anyone | Link your account |
-| `/unregister` | anyone | Stop tracking you (coins are kept) |
-| `/profile [user]` | anyone | Riot ID, rank, balance, betting record |
-| `/leaderboard` | anyone | Richest bettors in this server |
-| `/balance [user]` | anyone | Coin balance |
-| `/daily` | anyone | +100 coins every 24h |
-| `/bets` | anyone | Your open positions |
-| `/cancelbet [game]` | anyone | Cancel a bet before the lock |
-| `/setchannel [channel]` | Manage Server | Where games are announced |
-| `/lolbet-status` | Manage Server | Rate-limit, cache and tracker diagnostics |
+| `/inscription <RiotID#TAG> [region]` | anyone | Link your account |
+| `/desinscription` | anyone | Stop tracking you (coins are kept) |
+| `/profil [user]` | anyone | Riot ID, rank, balance, betting record |
+| `/classement` | anyone | Richest bettors in this server |
+| `/solde [user]` | anyone | Coin balance |
+| `/quotidien` | anyone | +100 coins every 24h |
+| `/paris` | anyone | Your open positions |
+| `/annulerpari [game]` | anyone | Cancel a bet before the lock |
+| `/salon [channel]` | Manage Server | Where games are announced |
+| `/statut` | Manage Server | Rate-limit, cache and tracker diagnostics |
 
 Betting itself happens on the buttons attached to each announcement.
 
@@ -70,7 +77,11 @@ Threads** and **Send Messages in Threads** only if you set
 `LOLBET_USE_THREADS=true`. No privileged intents are required — the bot never
 reads message content.
 
-Then, in your server: `/setchannel #lol-games`, and `/register YourName#TAG`.
+Then, in your server: `/salon #lol-games`, and `/inscription YourName#TAG`.
+
+Slash commands sync globally, which Discord can take up to an hour to
+propagate. Set `LOLBET_DEV_GUILD_ID` to your server id for instant sync while
+you are setting things up.
 
 ### Get a personal Riot key
 
@@ -269,8 +280,14 @@ pytest
 
 The suite covers the parts where being wrong is expensive: the dual-window rate
 limiter, the TTL cache and its persistence, Riot client routing and 404/429
-handling (via `respx`, no network), the payout maths, the wallet lifecycle, and
-the MVP/worst scoring. None of it needs a Discord token or a Riot key.
+handling (via `respx`, no network), the payout maths, the wallet lifecycle, the
+MVP/worst scoring, and the taunt selection. None of it needs a Discord token or
+a Riot key.
+
+On the banter: only players who opted in with `/inscription` are ever targeted,
+and only on their stats from that game. A support is never mocked for farming,
+an MVP is never piled on, and short games get no statistical jab. Keep it that
+way if you add lines.
 
 Layout:
 
@@ -290,6 +307,7 @@ src/lolbet/
     tracker.py         poll + maintenance loops
     betting.py         parimutuel pool + wallets
     scoring.py         MVP / worst player
+    taunts.py          fin-de-partie banter
     embeds.py          all Discord rendering
     enrichment.py      spectator payload → embed model
     messages.py        debounced message edits

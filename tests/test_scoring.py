@@ -244,9 +244,9 @@ def test_worst_player_reasons_are_their_weakest_areas():
 
     assert feeder.bottom_metrics() != feeder.top_metrics()
     # Damage is the heaviest mid-lane weight and theirs is by far the worst.
-    assert any("team damage" in reason for reason in feeder.bottom_metrics(3))
+    assert any("dégâts de l'équipe" in reason for reason in feeder.bottom_metrics(3))
     # Nobody in this match took an objective, so it is not a criticism.
-    assert all("objectives" not in reason for reason in feeder.bottom_metrics(3))
+    assert all("objectifs" not in reason for reason in feeder.bottom_metrics(3))
 
 
 def test_a_support_is_never_criticised_for_farm():

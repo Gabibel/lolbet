@@ -1,4 +1,4 @@
-"""/register, /unregister, /profile, /leaderboard."""
+"""/inscription, /desinscription, /profil, /classement."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ log = get_logger(__name__)
 
 
 def split_riot_id(raw: str) -> tuple[str, str] | None:
-    """``Faker#KR1`` -> ``("Faker", "KR1")``. None when it is not a Riot ID."""
+    """``Faker#KR1`` -> ``("Faker", "KR1")``. None si ce n'est pas un Riot ID."""
     text = (raw or "").strip()
     if "#" not in text:
         return None
@@ -48,10 +48,13 @@ class Registration(commands.Cog):
             if current in platform
         ][:25]
 
-    @app_commands.command(description="Link your Riot ID so your games get tracked here.")
+    @app_commands.command(
+        name="inscription",
+        description="Lie ton Riot ID pour que tes parties soient suivies ici.",
+    )
     @app_commands.describe(
-        riot_id="Your Riot ID, for example Faker#KR1",
-        region="Platform, e.g. euw1. Defaults to the server setting.",
+        riot_id="Ton Riot ID, par exemple Faker#KR1",
+        region="Plateforme, par exemple euw1. Par défaut celle du serveur.",
     )
     @app_commands.autocomplete(region=platform_autocomplete)
     @app_commands.guild_only()
@@ -61,7 +64,8 @@ class Registration(commands.Cog):
         parts = split_riot_id(riot_id)
         if parts is None:
             await interaction.response.send_message(
-                "That does not look like a Riot ID. Use the `Name#TAG` form, e.g. `Faker#KR1`.",
+                "Ça ne ressemble pas à un Riot ID. Utilise la forme `Pseudo#TAG`, "
+                "par exemple `Faker#KR1`.",
                 ephemeral=True,
             )
             return
@@ -73,27 +77,28 @@ class Registration(commands.Cog):
         try:
             account = await self.bot.riot.get_account_by_riot_id(game_name, tag_line, platform)
         except RiotUnauthorized as exc:
-            # Retrying will never help: the key is expired, revoked or wrong.
+            # Réessayer ne servira à rien : la clé est expirée ou invalide.
             log.error("register.bad_api_key", error=str(exc))
             await interaction.followup.send(
-                "The Riot API key is expired or invalid, so I cannot look anyone up.\n"
-                "Server owner: regenerate it at <https://developer.riotgames.com/>, put it "
-                "in `.env` as `LOLBET_RIOT_API_KEY`, and restart the bot. "
-                "Development keys expire every 24 hours.",
+                "La clé API Riot est expirée ou invalide, je ne peux chercher personne.\n"
+                "Propriétaire du serveur : régénère-la sur "
+                "<https://developer.riotgames.com/>, mets-la dans `.env` sous "
+                "`LOLBET_RIOT_API_KEY`, puis redémarre le bot. "
+                "Les clés de développement expirent toutes les 24 heures.",
                 ephemeral=True,
             )
             return
         except RiotAPIError as exc:
             log.warning("register.api_error", error=str(exc))
             await interaction.followup.send(
-                "Riot did not answer just now. Try again in a moment.", ephemeral=True
+                "Riot n'a pas répondu. Réessaie dans un instant.", ephemeral=True
             )
             return
 
         if not account or not account.get("puuid"):
             await interaction.followup.send(
-                f"No account called **{game_name}#{tag_line}** on `{platform}`. "
-                "Check the spelling and the region.",
+                f"Aucun compte **{game_name}#{tag_line}** sur `{platform}`. "
+                "Vérifie l'orthographe et la région.",
                 ephemeral=True,
             )
             return
@@ -114,7 +119,7 @@ class Registration(commands.Cog):
             ).scalar_one_or_none()
             if taken is not None:
                 await interaction.followup.send(
-                    f"**{resolved_name}#{resolved_tag}** is already registered here by "
+                    f"**{resolved_name}#{resolved_tag}** est déjà enregistré ici par "
                     f"<@{taken.discord_id}>.",
                     ephemeral=True,
                 )
@@ -139,7 +144,7 @@ class Registration(commands.Cog):
                         platform=platform,
                     )
                 )
-                verb = "Registered"
+                verb = "Inscrit"
             else:
                 existing.puuid = puuid
                 existing.game_name = resolved_name
@@ -147,19 +152,21 @@ class Registration(commands.Cog):
                 existing.platform = platform
                 existing.riot_id_refreshed_at = utcnow()
                 session.add(existing)
-                verb = "Updated"
+                verb = "Mis à jour"
 
             wallet = await self.bot.betting.get_wallet(session, guild_id, interaction.user.id)
             await session.commit()
 
         await interaction.followup.send(
-            f"{verb}: **{resolved_name}#{resolved_tag}** on `{platform}`.\n"
-            f"Your games will be announced here. Balance: "
-            f"**{format_coins(wallet.balance)}** coins.",
+            f"{verb} : **{resolved_name}#{resolved_tag}** sur `{platform}`.\n"
+            f"Tes parties seront annoncées ici. Solde : "
+            f"**{format_coins(wallet.balance)}** pièces.",
             ephemeral=True,
         )
 
-    @app_commands.command(description="Stop tracking your account in this server.")
+    @app_commands.command(
+        name="desinscription", description="Arrête le suivi de ton compte sur ce serveur."
+    )
     @app_commands.guild_only()
     async def unregister(self, interaction: discord.Interaction) -> None:
         async with self.bot.session_factory() as session:
@@ -173,7 +180,7 @@ class Registration(commands.Cog):
             ).scalar_one_or_none()
             if player is None:
                 await interaction.response.send_message(
-                    "You are not registered here.", ephemeral=True
+                    "Tu n'es pas inscrit ici.", ephemeral=True
                 )
                 return
             riot_id = player.riot_id
@@ -181,12 +188,14 @@ class Registration(commands.Cog):
             await session.commit()
 
         await interaction.response.send_message(
-            f"Unregistered **{riot_id}**. Your coins and bet history stay put.",
+            f"**{riot_id}** n'est plus suivi. Tes pièces et ton historique restent en place.",
             ephemeral=True,
         )
 
-    @app_commands.command(description="Show a registered player, their rank and their coins.")
-    @app_commands.describe(user="Whose profile to show. Defaults to you.")
+    @app_commands.command(
+        name="profil", description="Affiche un joueur inscrit, son rang et ses pièces."
+    )
+    @app_commands.describe(user="De qui afficher le profil. Toi par défaut.")
     @app_commands.guild_only()
     async def profile(
         self, interaction: discord.Interaction, user: discord.User | None = None
@@ -208,7 +217,7 @@ class Registration(commands.Cog):
 
         if player is None:
             await interaction.response.send_message(
-                f"{target.mention} has not registered a Riot ID here yet. Try `/register`.",
+                f"{target.mention} n'a pas encore lié de Riot ID ici. Essaie `/inscription`.",
                 ephemeral=True,
             )
             return
@@ -224,10 +233,10 @@ class Registration(commands.Cog):
                 rank_line = rank.display
             summoner = await self.bot.riot.get_summoner(player.puuid, player.platform)
             if summoner:
-                level_line = f"Level {summoner.get('summonerLevel', '?')}"
+                level_line = f"Niveau {summoner.get('summonerLevel', '?')}"
                 icon = summoner.get("profileIconId")
         except RiotAPIError as exc:
-            # Rank is a nicety; still show the profile if Riot is unavailable.
+            # Le rang est un bonus : on affiche le profil même si Riot est muet.
             log.warning("profile.api_error", error=str(exc))
 
         embed = discord.Embed(
@@ -238,18 +247,20 @@ class Registration(commands.Cog):
         if icon is not None:
             embed.set_thumbnail(url=self.bot.ddragon.profile_icon_url(int(icon)))
         embed.add_field(name="Solo/duo", value=rank_line, inline=False)
-        embed.add_field(name="Balance", value=f"{format_coins(wallet.balance)} coins")
+        embed.add_field(name="Solde", value=f"{format_coins(wallet.balance)} pièces")
         embed.add_field(
-            name="Betting record",
+            name="Bilan des paris",
             value=(
-                f"{wallet.bets_won}W / {wallet.bets_lost}L\n"
-                f"Net {wallet.net_profit:+,} • wagered {format_coins(wallet.total_wagered)}"
+                f"{wallet.bets_won}V / {wallet.bets_lost}D\n"
+                f"Net {wallet.net_profit:+,} • misé {format_coins(wallet.total_wagered)}"
             ),
         )
-        embed.set_footer(text=f"Tracked for {target.display_name}")
+        embed.set_footer(text=f"Suivi pour {target.display_name}")
         await interaction.followup.send(embed=embed)
 
-    @app_commands.command(description="Richest bettors in this server.")
+    @app_commands.command(
+        name="classement", description="Les plus riches parieurs de ce serveur."
+    )
     @app_commands.guild_only()
     async def leaderboard(self, interaction: discord.Interaction) -> None:
         guild_id = interaction.guild_id or 0
@@ -266,7 +277,7 @@ class Registration(commands.Cog):
 
         if not wallets:
             await interaction.response.send_message(
-                "Nobody has placed a bet yet.", ephemeral=True
+                "Personne n'a encore parié.", ephemeral=True
             )
             return
 
@@ -278,15 +289,15 @@ class Registration(commands.Cog):
             suffix = f" ({discord.utils.escape_markdown(riot_id)})" if riot_id else ""
             lines.append(
                 f"{prefix} <@{wallet.user_id}>{suffix} - **{format_coins(wallet.balance)}** "
-                f"({wallet.bets_won}W/{wallet.bets_lost}L, {wallet.net_profit:+,})"
+                f"({wallet.bets_won}V/{wallet.bets_lost}D, {wallet.net_profit:+,})"
             )
 
         embed = discord.Embed(
-            title="Leaderboard",
+            title="Classement",
             description="\n".join(lines),
             colour=discord.Colour(0xF1C40F),
         )
-        embed.set_footer(text="Virtual coins only.")
+        embed.set_footer(text="Pièces virtuelles uniquement.")
         await interaction.response.send_message(embed=embed)
 
 

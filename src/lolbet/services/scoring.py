@@ -78,13 +78,13 @@ WIN_BONUS = 6.0
 SCALE = 100.0
 
 METRIC_LABELS: dict[str, str] = {
-    "kill_participation": "kill participation",
-    "damage_share": "team damage",
-    "tank_share": "damage absorbed",
-    "vision_share": "team vision",
-    "objective": "objectives",
+    "kill_participation": "participation aux kills",
+    "damage_share": "dégâts de l'équipe",
+    "tank_share": "dégâts encaissés",
+    "vision_share": "vision de l'équipe",
+    "objective": "objectifs",
     "cs": "farm",
-    "gold_efficiency": "damage per gold",
+    "gold_efficiency": "dégâts par or",
 }
 
 

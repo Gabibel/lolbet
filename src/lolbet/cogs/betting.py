@@ -1,4 +1,4 @@
-"""/balance, /daily, /bets, /cancelbet."""
+"""/solde, /quotidien, /paris, /annulerpari."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from ..models import Bet, GameStatus, TrackedGame
 from ..services.betting import BettingError
 from ..services.embeds import queue_name
 from ..utils import discord_timestamp, format_coins, format_duration
+from ..views import SIDE_LABELS
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..bot import LoLBet
@@ -41,8 +42,8 @@ class Betting(commands.Cog):
             ).all()
         return [(bet, game) for bet, game in rows]
 
-    @app_commands.command(description="Your coin balance in this server.")
-    @app_commands.describe(user="Whose balance to check. Defaults to you.")
+    @app_commands.command(name="solde", description="Ton solde de pièces sur ce serveur.")
+    @app_commands.describe(user="De qui afficher le solde. Toi par défaut.")
     @app_commands.guild_only()
     async def balance(
         self, interaction: discord.Interaction, user: discord.User | None = None
@@ -53,12 +54,12 @@ class Betting(commands.Cog):
                 session, interaction.guild_id or 0, target.id, create=False
             )
         await interaction.response.send_message(
-            f"{target.mention} has **{format_coins(wallet.balance)}** coins "
-            f"({wallet.bets_won}W/{wallet.bets_lost}L, net {wallet.net_profit:+,}).",
+            f"{target.mention} a **{format_coins(wallet.balance)}** pièces "
+            f"({wallet.bets_won}V/{wallet.bets_lost}D, net {wallet.net_profit:+,}).",
             ephemeral=True,
         )
 
-    @app_commands.command(description="Claim your daily coins.")
+    @app_commands.command(name="quotidien", description="Réclame tes pièces du jour.")
     @app_commands.guild_only()
     async def daily(self, interaction: discord.Interaction) -> None:
         async with self.bot.session_factory() as session:
@@ -72,32 +73,34 @@ class Betting(commands.Cog):
 
         if amount == 0 and remaining is not None:
             await interaction.response.send_message(
-                f"Already claimed. Next one in **{format_duration(remaining.total_seconds())}**.",
+                f"Déjà réclamé. Prochaine fois dans "
+                f"**{format_duration(remaining.total_seconds())}**.",
                 ephemeral=True,
             )
             return
         await interaction.response.send_message(
-            f"**+{format_coins(amount)}** coins. Balance: "
+            f"**+{format_coins(amount)}** pièces. Solde : "
             f"**{format_coins(wallet.balance)}**.",
             ephemeral=True,
         )
 
-    @app_commands.command(description="Your open bets in this server.")
+    @app_commands.command(name="paris", description="Tes paris en cours sur ce serveur.")
     @app_commands.guild_only()
     async def bets(self, interaction: discord.Interaction) -> None:
         open_bets = await self._open_bets(interaction.guild_id or 0, interaction.user.id)
         if not open_bets:
             await interaction.response.send_message(
-                "No open bets. They show up as buttons on live-game posts.", ephemeral=True
+                "Aucun pari en cours. Ils se placent sur les boutons des annonces de partie.",
+                ephemeral=True,
             )
             return
 
         lines = []
         for bet, game in open_bets:
-            lock = discord_timestamp(game.lock_at) if game.lock_at else "soon"
+            lock = discord_timestamp(game.lock_at) if game.lock_at else "bientôt"
             lines.append(
-                f"**{bet.side}** {format_coins(bet.amount)} on `{game.riot_game_id}` "
-                f"({queue_name(game.queue_id)}) - locks {lock}"
+                f"**{SIDE_LABELS.get(bet.side, bet.side)}** {format_coins(bet.amount)} sur "
+                f"`{game.riot_game_id}` ({queue_name(game.queue_id)}) - fermeture {lock}"
             )
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
@@ -108,15 +111,18 @@ class Betting(commands.Cog):
         current = (current or "").lower()
         return [
             app_commands.Choice(
-                name=f"{game.riot_game_id} - {bet.side} {bet.amount}"[:100],
+                name=f"{game.riot_game_id} - {SIDE_LABELS.get(bet.side, bet.side)} "
+                f"{bet.amount}"[:100],
                 value=str(game.id),
             )
             for bet, game in open_bets
             if current in game.riot_game_id.lower()
         ][:25]
 
-    @app_commands.command(description="Cancel an open bet before the game locks.")
-    @app_commands.describe(game="Which bet to cancel. Only needed if you have several.")
+    @app_commands.command(
+        name="annulerpari", description="Annule un pari avant la fermeture des paris."
+    )
+    @app_commands.describe(game="Quel pari annuler. Utile seulement si tu en as plusieurs.")
     @app_commands.autocomplete(game=game_autocomplete)
     @app_commands.guild_only()
     async def cancelbet(
@@ -125,7 +131,8 @@ class Betting(commands.Cog):
         open_bets = await self._open_bets(interaction.guild_id or 0, interaction.user.id)
         if not open_bets:
             await interaction.response.send_message(
-                "You have no cancellable bets. Bets lock 5 minutes into the game.",
+                "Aucun pari annulable. Les paris se ferment 5 minutes après le début "
+                "de la partie.",
                 ephemeral=True,
             )
             return
@@ -138,16 +145,18 @@ class Betting(commands.Cog):
             chosen = next((pair for pair in open_bets if pair[1].id == wanted), None)
             if chosen is None:
                 await interaction.response.send_message(
-                    "No open bet on that game.", ephemeral=True
+                    "Aucun pari en cours sur cette partie.", ephemeral=True
                 )
                 return
         elif len(open_bets) > 1:
             listing = "\n".join(
-                f"- `{g.riot_game_id}` ({b.side} {format_coins(b.amount)})"
+                f"- `{g.riot_game_id}` ({SIDE_LABELS.get(b.side, b.side)} "
+                f"{format_coins(b.amount)})"
                 for b, g in open_bets
             )
             await interaction.response.send_message(
-                f"You have several open bets. Re-run `/cancelbet` and pick one:\n{listing}",
+                f"Tu as plusieurs paris en cours. Relance `/annulerpari` et choisis :\n"
+                f"{listing}",
                 ephemeral=True,
             )
             return
@@ -159,7 +168,7 @@ class Betting(commands.Cog):
             stored = await session.get(TrackedGame, tracked_game.id)
             if stored is None:
                 await interaction.response.send_message(
-                    "That game is no longer tracked.", ephemeral=True
+                    "Cette partie n'est plus suivie.", ephemeral=True
                 )
                 return
             try:
@@ -173,8 +182,8 @@ class Betting(commands.Cog):
             await session.commit()
 
         await interaction.response.send_message(
-            f"Cancelled **{format_coins(bet.amount)}** on **{bet.side}**. "
-            f"Balance: {format_coins(wallet.balance)}.",
+            f"**{format_coins(bet.amount)}** sur **{SIDE_LABELS.get(bet.side, bet.side)}** "
+            f"annulé. Solde : {format_coins(wallet.balance)}.",
             ephemeral=True,
         )
         if tracked_game.id is not None:

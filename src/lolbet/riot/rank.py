@@ -50,6 +50,19 @@ TIER_EMOJI: dict[str, str] = {
 TIER_WIDTH = 400
 APEX_BASE = len(TIERS) * TIER_WIDTH
 
+TIER_LABELS_FR: dict[str, str] = {
+    "IRON": "Fer",
+    "BRONZE": "Bronze",
+    "SILVER": "Argent",
+    "GOLD": "Or",
+    "PLATINUM": "Platine",
+    "EMERALD": "Émeraude",
+    "DIAMOND": "Diamant",
+    "MASTER": "Maître",
+    "GRANDMASTER": "Grand Maître",
+    "CHALLENGER": "Challenger",
+}
+
 SOLO_QUEUE = "RANKED_SOLO_5x5"
 FLEX_QUEUE = "RANKED_FLEX_SR"
 
@@ -104,16 +117,16 @@ class RankInfo:
     def display(self) -> str:
         tier = self.tier.upper()
         emoji = TIER_EMOJI.get(tier, "")
-        name = tier.title()
+        name = TIER_LABELS_FR.get(tier, tier.title())
         core = name if tier in APEX_TIERS else f"{name} {self.division.upper()}"
         text = f"{emoji} {core} - {self.league_points} LP".strip()
         rate = self.winrate
         if rate is not None:
-            text += f" ({self.wins}W {self.losses}L, {rate:.0f}%)"
+            text += f" ({self.wins}V {self.losses}D, {rate:.0f}%)"
         return text
 
 
-UNRANKED_LABEL = "Unranked"
+UNRANKED_LABEL = "Non classé"
 
 
 def parse_entries(entries: list[dict] | None) -> dict[str, RankInfo]:
@@ -144,11 +157,11 @@ def solo_queue_rank(entries: list[dict] | None) -> RankInfo | None:
 def score_to_label(score: float) -> str:
     """Inverse of RankInfo.score, for showing an average team elo."""
     if score >= APEX_BASE:
-        return f"Master+ ({int(score - APEX_BASE)} LP)"
+        return f"Maître+ ({int(score - APEX_BASE)} LP)"
     index = max(0, min(len(TIERS) - 1, int(score // TIER_WIDTH)))
     within = score - index * TIER_WIDTH
     division = DIVISION_ORDER[max(0, min(3, int(within // 100)))]
-    return f"{TIERS[index].title()} {division}"
+    return f"{TIER_LABELS_FR.get(TIERS[index], TIERS[index].title())} {division}"
 
 
 def average_score(ranks: list[RankInfo | None]) -> float | None:

@@ -45,6 +45,7 @@ from .embeds import (
 )
 from .enrichment import base_card, find_team_id
 from .scoring import score_match
+from .taunts import build_taunt_content
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..bot import LoLBet
@@ -608,6 +609,13 @@ class GameTracker:
             )
 
         tracked_puuids = {p.puuid for p in participants}
+        # Les vannes ne visent que des joueurs inscrits volontairement,
+        # et uniquement sur leurs statistiques de la partie.
+        taunts = build_taunt_content(
+            scores,
+            {p.puuid: p.discord_id for p in participants},
+            seed=snapshot[0],
+        )
         embed = build_result_embed(
             riot_game_id=snapshot[0],
             queue_id=snapshot[1],
@@ -617,7 +625,7 @@ class GameTracker:
             settlement=settlement,
             ddragon=bot.ddragon,
         )
-        await self._post_followup(game_id, embed)
+        await self._post_followup(game_id, embed, content=taunts)
         await bot.updater.refresh(game_id)
         log.info(
             "tracker.resolved",
@@ -671,7 +679,9 @@ class GameTracker:
         await self._post_followup(game_id, build_void_embed(riot_game_id, settlement))
         await bot.updater.refresh(game_id)
 
-    async def _post_followup(self, game_id: int, embed: discord.Embed) -> None:
+    async def _post_followup(
+        self, game_id: int, embed: discord.Embed, content: str | None = None
+    ) -> None:
         """Post in the game thread when there is one, else in the channel.
 
         Without a thread the message replies to the announcement, so the two
@@ -687,12 +697,12 @@ class GameTracker:
             return
         reference = None if game.thread_id else self._bot.updater.reference(game)
         try:
-            await destination.send(embed=embed, reference=reference)
+            await destination.send(content=content, embed=embed, reference=reference)
         except discord.HTTPException as exc:
             # A deleted announcement makes the reference invalid; resend plain.
             log.warning("tracker.followup_retry", game=game.riot_game_id, error=str(exc))
             try:
-                await destination.send(embed=embed)
+                await destination.send(content=content, embed=embed)
             except (discord.Forbidden, discord.HTTPException) as inner:
                 log.warning(
                     "tracker.followup_failed", game=game.riot_game_id, error=str(inner)
