@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from lolbet.services.scoring import MatchScores, PlayerScore
+from lolbet.services.taunt_lines import LVP_LINES, MVP_LINES
 from lolbet.services.taunts import TAUNTS, build_taunt_content, taunt_for
+
+# Toutes les variantes portent le meme emblene : c'est le marqueur stable,
+# la formulation, elle, doit pouvoir etre editee librement.
+LVP_MARK = "\N{POLICE CAR}"
+MVP_MARK = "\N{GLOWING STAR}"
 
 
 def score(
@@ -54,6 +60,13 @@ def test_every_category_has_lines():
     assert all(lines for lines in TAUNTS.values())
 
 
+def test_special_lines_all_carry_their_mark():
+    """Les tests, comme les joueurs, reperent la ligne a son emblene."""
+    assert all(LVP_MARK in line for line in LVP_LINES)
+    assert all(MVP_MARK in line for line in MVP_LINES)
+    assert all("{mention}" in line for line in LVP_LINES + MVP_LINES)
+
+
 def test_the_same_match_always_gives_the_same_line():
     """Un récapitulatif réaffiché ne doit pas changer de vanne."""
     player = score(deaths=12)
@@ -101,10 +114,14 @@ def test_mvp_is_never_piled_on():
     assert line in TAUNTS["mvp_won"]
 
 
-def test_death_count_is_injected_into_the_line():
-    line = taunt_for(score(deaths=14), is_mvp=False, is_worst=False, duration_seconds=1800)
-    assert "14" in line
-    assert "{deaths}" not in line
+def test_no_placeholder_survives_formatting():
+    """Une accolade oubliee dans une phrase se verrait tout de suite."""
+    for deaths in (0, 4, 14):
+        line = taunt_for(
+            score(deaths=deaths), is_mvp=False, is_worst=False, duration_seconds=1800
+        )
+        assert "{" not in line
+        assert "}" not in line
 
 
 def test_a_support_is_never_mocked_for_his_farm():
@@ -157,15 +174,15 @@ def test_lvp_line_only_when_a_tracked_player_is_the_worst():
     with_lvp = build_taunt_content(scores_for([tracked, stranger], worst=tracked), {"a": 111})
     without = build_taunt_content(scores_for([tracked, stranger], worst=stranger), {"a": 111})
 
-    assert "LVP de la partie" in with_lvp
-    assert "direction la prison" in with_lvp
-    assert "LVP de la partie" not in without
+    assert LVP_MARK in with_lvp
+    assert "<@111>" in with_lvp
+    assert LVP_MARK not in without
 
 
 def test_mvp_line_when_a_tracked_player_carried():
     tracked = score(puuid="a", win=True, kills=18, deaths=1)
     content = build_taunt_content(scores_for([tracked], mvp=tracked), {"a": 111})
-    assert "MVP de la partie" in content
+    assert MVP_MARK in content
 
 
 def test_untracked_players_are_never_targeted():

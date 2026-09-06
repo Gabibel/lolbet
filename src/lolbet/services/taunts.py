@@ -1,8 +1,12 @@
-"""Petites vannes postées avec le récapitulatif de fin de partie.
+"""Choix de la vanne de fin de partie.
 
-Le ton est celui d'un serveur entre amis : on chambre, on n'insulte pas. Seuls
-les joueurs qui se sont inscrits volontairement avec /inscription sont visés,
-et uniquement sur leurs statistiques de la partie.
+Ce fichier ne contient que la logique : les phrases sont dans
+``taunt_lines.py``, qui est fait pour être édité librement.
+
+Le principe est de toujours retenir la situation **la plus spécifique** qui
+s'applique. Un joueur qui bat son record de morts pendant sa cinquième défaite
+d'affilée mérite qu'on parle du record : c'est plus rare, donc plus drôle. Les
+catégories génériques ne servent que quand rien de remarquable ne s'est passé.
 
 Le tirage est déterministe (graine = identifiant de match + puuid) : un même
 récapitulatif réaffiché donne toujours la même phrase.
@@ -14,114 +18,37 @@ import random
 
 from .history import PlayerForm
 from .scoring import PlayerScore
+from .taunt_lines import JABS, LVP_LINES, MVP_LINES, TAUNTS, total_lines
 
-# Seuils qui décident de la catégorie de vanne.
+__all__ = [
+    "JABS",
+    "LVP_LINES",
+    "MVP_LINES",
+    "TAUNTS",
+    "build_taunt_content",
+    "taunt_for",
+    "total_lines",
+]
+
+# Seuils qui décident de la catégorie.
 DEATHS_FED = 10
+KILLS_RECORD = 15
 KDA_BAD = 1.0
 KDA_GREAT = 4.0
+STREAK_THRESHOLD = 3
+REPEAT_LVP_THRESHOLD = 2
+
+# Une partie courte est écrasée, une longue est un marathon.
+STOMP_MAX_MINUTES = 20
+LONG_GAME_MIN_MINUTES = 40
+# En dessous, un zéro mort ne veut rien dire (remake, partie avortée).
+DEATHLESS_MIN_MINUTES = 15
+
+# Seuils des piques statistiques.
 LOW_VISION = 10
 LOW_CS_PER_MIN = 3.0
+LOW_DAMAGE_SHARE = 0.10
 MIN_MINUTES_FOR_DETAIL = 20
-# En dessous, une série n'a rien de remarquable.
-STREAK_THRESHOLD = 3
-
-LVP_LINE = "\N{POLICE CAR} LVP de la partie : {mention} - direction la prison !"
-MVP_LINE = "\N{GLOWING STAR} MVP de la partie : {mention} - savoure, c'est rare."
-
-TAUNTS: dict[str, tuple[str, ...]] = {
-    "worst_lost": (
-        "Tu as feed et en plus tu as perdu, belle performance.",
-        "Dernier des dix joueurs et défaite : le combo complet.",
-        "Statistiquement, ton équipe aurait mieux fait en 4 contre 5.",
-        "Pire joueur de la partie. De la partie entière. Bravo.",
-        "À ce niveau ce n'est plus une défaite, c'est une contribution à l'ennemi.",
-        "Il y avait dix joueurs sur cette carte et tu as trouvé le moyen d'être dixième.",
-    ),
-    "worst_won": (
-        "Pire joueur de la partie mais tu gagnes quand même. Remercie tes coéquipiers.",
-        "Porté. Littéralement porté du début à la fin.",
-        "Victoire volée, et tout le monde a vu le tableau des scores.",
-        "Tu as gagné. Le rapport de police dit autre chose.",
-        "Quatre personnes ont travaillé pour toi ce soir.",
-    ),
-    "mvp_won": (
-        "MVP et victoire. Rien à redire, pour une fois.",
-        "Là tu as joué comme si le classement comptait. Continue.",
-        "Carry assumé. Profite, ça ne durera pas.",
-        "Grosse partie. On note la date.",
-    ),
-    "mvp_lost": (
-        "Meilleur joueur de la partie et tu perds quand même. Mes condoléances.",
-        "Tu as fait ton travail, tes coéquipiers ont fait le reste.",
-        "La solo queue résumée en une partie.",
-        "Tu as porté, ils ont lâché. Classique.",
-    ),
-    "fed_lost": (
-        "{deaths} morts. On appelle ça un service public pour l'équipe adverse.",
-        "{deaths} morts et une défaite. Tu as distribué plus d'or que la banque.",
-        "{deaths} fois au sol. Le respawn te connaît par ton prénom.",
-        "Avec {deaths} morts, tu as surtout joué le rôle de sbire.",
-    ),
-    "fed_won": (
-        "{deaths} morts et tu gagnes quand même. L'univers est mal réglé.",
-        "{deaths} morts. Victoire. Ne pose pas de questions, prends les LP.",
-        "Tu es mort {deaths} fois et tu souris quand même. Admirable.",
-    ),
-    "bad_lost": (
-        "Défaite. On va dire que c'était le jungler.",
-        "Une de plus. Le classement ne se répare pas tout seul.",
-        "Partie oubliable. Comme les trois précédentes.",
-        "Ce n'était pas ta partie. Ni la précédente, d'ailleurs.",
-        "Défaite méritée, et tu le sais.",
-    ),
-    "bad_won": (
-        "Tu as gagné malgré toi. Ça compte quand même.",
-        "Victoire discrète. Très discrète. On t'a à peine vu.",
-        "Gagné. Ton équipe a compensé, mais gagné.",
-    ),
-    "good_lost": (
-        "Bonne partie, mauvais résultat. Ça arrive.",
-        "Tu as tenu ta ligne, le reste a coulé.",
-        "Rien à te reprocher cette fois. Profites-en, c'est rare.",
-    ),
-    "good_won": (
-        "Victoire propre. Sobre, efficace, presque suspect.",
-        "Gagné sans forcer. Encore trois cents comme ça et tu es Maître.",
-        "Solide. On te laisse tranquille pour cette fois.",
-        "Bien joué. Voilà, c'est dit, n'en parlons plus.",
-    ),
-    # Catégories qui regardent l'historique, pas seulement la partie.
-    "first_game": (
-        "Première partie enregistrée. Le compteur démarre maintenant.",
-        "Bienvenue. À partir de maintenant, tout est archivé.",
-        "Première ligne à ton dossier. Il va falloir vivre avec.",
-    ),
-    "record_deaths": (
-        "Nouveau record personnel : {deaths} morts. On grave ça quelque part.",
-        "{deaths} morts, ton pire total à ce jour. Félicitations, j'imagine.",
-        "Jamais tu n'étais mort autant. Le plafond était plus haut que prévu.",
-        "{deaths} morts : record battu. Certains sommets ne se cherchent pas.",
-    ),
-    "streak_lost": (
-        "{streak} défaites d'affilée. Ce n'est plus une passe, c'est une trajectoire.",
-        "{streak} de suite. Une pause, peut-être ?",
-        "{streak}e défaite consécutive. Le classement, lui, s'en souvient.",
-        "Toujours pas de victoire depuis {streak} parties. Courage.",
-        "{streak} défaites de rang. À ce stade c'est une méthode.",
-    ),
-    "streak_won": (
-        "{streak} victoires d'affilée. Profite, la moyenne finit toujours par revenir.",
-        "{streak} de suite. Quelqu'un a changé de compte ?",
-        "{streak}e victoire consécutive. On commence à te croire.",
-        "{streak} d'affilée. Personne ne t'arrête, pour l'instant.",
-    ),
-}
-
-DETAIL_JABS: tuple[tuple[str, str], ...] = (
-    ("vision", "Score de vision : {vision}. Tu joues les yeux fermés ?"),
-    ("cs", "{cs_per_min} CS par minute. Les sbires se portent bien, merci."),
-    ("damage", "{damage} de dégâts en {minutes} minutes. Tu étais là en spectateur ?"),
-)
 
 
 def _category(
@@ -130,34 +57,51 @@ def _category(
     is_mvp: bool,
     is_worst: bool,
     form: PlayerForm | None = None,
+    duration_seconds: int = 0,
 ) -> str:
-    """Choisit la catégorie la plus spécifique qui s'applique."""
+    """La situation la plus spécifique qui décrit cette partie."""
     won = score.win
+    minutes = duration_seconds / 60
 
-    # Un joueur sans historique n'a ni série ni record à commenter.
-    if form is not None and form.is_new:
-        return "first_game"
+    # -- ce que seul l'historique peut dire -------------------------------
+    if form is not None:
+        if form.is_new:
+            return "first_game"
+        # Un record ne vaut d'être cité que s'il est marquant dans l'absolu :
+        # battre son record avec 3 morts n'intéresse personne.
+        if score.deaths >= DEATHS_FED and score.deaths > form.worst_deaths:
+            return "record_deaths"
+        if score.kills >= KILLS_RECORD and score.kills > form.best_kills:
+            return "record_kills"
+        if is_worst and form.lvp_count >= REPEAT_LVP_THRESHOLD:
+            return "repeat_lvp"
+        if is_mvp and form.mvp_count == 0:
+            return "first_mvp"
 
-    # Un record personnel de morts prime : c'est plus précis que tout le reste.
-    if (
-        form is not None
-        and score.deaths >= DEATHS_FED
-        and score.deaths > form.worst_deaths
-    ):
-        return "record_deaths"
-
+    # -- les titres de la partie ------------------------------------------
     if is_worst:
         return "worst_won" if won else "worst_lost"
     if is_mvp:
         return "mvp_won" if won else "mvp_lost"
 
-    # La série inclut la partie qui vient de se jouer.
+    # -- les faits rares ---------------------------------------------------
+    if score.deaths == 0 and minutes >= DEATHLESS_MIN_MINUTES:
+        return "deathless_won" if won else "deathless_lost"
+
     if form is not None:
-        streak = form.winning_streak + 1 if won else form.losing_streak + 1
-        broke_streak = (won and form.streak < 0) or (not won and form.streak > 0)
-        if not broke_streak and streak >= STREAK_THRESHOLD:
+        streak = (form.winning_streak if won else form.losing_streak) + 1
+        # Une série qui vient de se briser n'en est plus une.
+        broke = (won and form.streak < 0) or (not won and form.streak > 0)
+        if not broke and streak >= STREAK_THRESHOLD:
             return "streak_won" if won else "streak_lost"
 
+    # -- le rythme de la partie -------------------------------------------
+    if minutes and minutes < STOMP_MAX_MINUTES:
+        return "stomp_won" if won else "stomp_lost"
+    if minutes > LONG_GAME_MIN_MINUTES:
+        return "long_game_won" if won else "long_game_lost"
+
+    # -- rien de remarquable : on juge la performance ----------------------
     if score.deaths >= DEATHS_FED:
         return "fed_won" if won else "fed_lost"
     if score.kda_ratio < KDA_BAD:
@@ -167,24 +111,48 @@ def _category(
     return "good_won" if won else "bad_lost"
 
 
-def _detail_jab(score: PlayerScore, duration_seconds: int, rng: random.Random) -> str | None:
+def _fields(
+    score: PlayerScore, duration_seconds: int, form: PlayerForm | None
+) -> dict[str, object]:
+    """Tout ce qu'une phrase peut vouloir insérer."""
+    streak = 0
+    if form is not None:
+        streak = (form.winning_streak if score.win else form.losing_streak) + 1
+    return {
+        "deaths": score.deaths,
+        "kills": score.kills,
+        "assists": score.assists,
+        "streak": streak,
+        "minutes": int(duration_seconds / 60),
+        "cs": score.cs,
+        "cs_per_min": f"{score.cs_per_min:.1f}",
+        "vision": score.vision_score,
+        "damage": f"{score.damage:,}".replace(",", " "),
+    }
+
+
+def _jab(
+    score: PlayerScore,
+    duration_seconds: int,
+    rng: random.Random,
+    fields: dict[str, object],
+) -> str | None:
     """Pique optionnelle sur une statistique vraiment mauvaise."""
-    minutes = duration_seconds / 60
-    if minutes < MIN_MINUTES_FOR_DETAIL:
+    if duration_seconds / 60 < MIN_MINUTES_FOR_DETAIL:
         return None
 
     candidates: list[str] = []
     if score.vision_score < LOW_VISION:
-        candidates.append(DETAIL_JABS[0][1].format(vision=score.vision_score))
+        candidates.extend(JABS["vision"])
     # Un support ne farme pas : lui reprocher ses CS n'a aucun sens.
     if score.position != "UTILITY" and score.cs_per_min < LOW_CS_PER_MIN:
-        candidates.append(DETAIL_JABS[1][1].format(cs_per_min=f"{score.cs_per_min:.1f}"))
-    if score.metrics.get("damage_share", 1.0) < 0.10:
-        candidates.append(
-            DETAIL_JABS[2][1].format(damage=f"{score.damage:,}".replace(",", " "),
-                                     minutes=int(minutes))
-        )
-    return rng.choice(candidates) if candidates else None
+        candidates.extend(JABS["cs"])
+    if score.metrics.get("damage_share", 1.0) < LOW_DAMAGE_SHARE:
+        candidates.extend(JABS["damage"])
+
+    if not candidates:
+        return None
+    return rng.choice(candidates).format(**fields)
 
 
 def taunt_for(
@@ -202,16 +170,21 @@ def taunt_for(
     séries et de records, ce qu'une partie isolée ne dit pas.
     """
     rng = random.Random(f"{seed}:{score.puuid}")
-    category = _category(score, is_mvp=is_mvp, is_worst=is_worst, form=form)
-    line = rng.choice(TAUNTS[category])
-    streak = 0
-    if form is not None:
-        streak = (form.winning_streak if score.win else form.losing_streak) + 1
-    line = line.format(deaths=score.deaths, streak=streak)
+    category = _category(
+        score,
+        is_mvp=is_mvp,
+        is_worst=is_worst,
+        form=form,
+        duration_seconds=duration_seconds,
+    )
+    fields = _fields(score, duration_seconds, form)
+    line = rng.choice(TAUNTS[category]).format(**fields)
 
-    # On n'enfonce que ceux qui le méritent : jamais un MVP.
-    if not is_mvp and (score.deaths >= DEATHS_FED or score.kda_ratio < KDA_BAD or is_worst):
-        extra = _detail_jab(score, duration_seconds, rng)
+    # On n'enfonce que ceux qui le méritent : jamais un MVP, jamais une
+    # bonne partie.
+    deserves_jab = is_worst or score.deaths >= DEATHS_FED or score.kda_ratio < KDA_BAD
+    if not is_mvp and deserves_jab:
+        extra = _jab(score, duration_seconds, rng, fields)
         if extra:
             line = f"{line} {extra}"
     return line
@@ -233,6 +206,7 @@ def build_taunt_content(
     """
     mvp_puuid = scores.mvp.puuid if scores.mvp else None
     worst_puuid = scores.worst.puuid if scores.worst else None
+    rng = random.Random(seed)
 
     lines: list[str] = []
     for puuid, discord_id in list(tracked.items())[:max_lines]:
@@ -250,8 +224,8 @@ def build_taunt_content(
         lines.append(f"<@{discord_id}> {phrase}")
 
     if worst_puuid in tracked:
-        lines.append(LVP_LINE.format(mention=f"<@{tracked[worst_puuid]}>"))
+        lines.append(rng.choice(LVP_LINES).format(mention=f"<@{tracked[worst_puuid]}>"))
     if mvp_puuid in tracked:
-        lines.append(MVP_LINE.format(mention=f"<@{tracked[mvp_puuid]}>"))
+        lines.append(rng.choice(MVP_LINES).format(mention=f"<@{tracked[mvp_puuid]}>"))
 
     return "\n".join(lines)[:2000]

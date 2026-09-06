@@ -434,10 +434,29 @@ handling (via `respx`, no network), the payout maths, the wallet lifecycle, the
 MVP/worst scoring, and the taunt selection. None of it needs a Discord token or
 a Riot key.
 
-On the banter: only players who opted in with `/inscription` are ever targeted,
-and only on their stats from that game. A support is never mocked for farming,
-an MVP is never piled on, and short games get no statistical jab. Keep it that
-way if you add lines.
+### Editing the banter
+
+All ~430 lines live in [`taunt_lines.py`](src/lolbet/services/taunt_lines.py),
+which contains no logic at all - edit, add or delete freely. The selection
+rules are in `taunts.py` and read the file by category key.
+
+The rule that shapes everything: **the most specific situation wins**. Someone
+who breaks their personal death record during a fifth straight defeat gets the
+record line, because it is rarer and therefore funnier. Generic lines only fire
+when nothing notable happened. Priority runs: newcomer, personal record,
+repeat LVP or first MVP, game title, deathless game, streak, game length, then
+plain performance.
+
+23 categories: the ten game-outcome ones (MVP/LVP, fed, good, bad, each with a
+win and a loss variant), seven that need history (first game, death record,
+kill record, both streaks, first MVP, repeat LVP), and six about the game
+itself (deathless, stomp, marathon, each way).
+
+Guardrails, kept under test: only players who opted in are targeted, and only
+on their stats from that game. A support is never mocked for farming, an MVP is
+never piled on, short games get no statistical jab, a zero-death remake does not
+count as a clean game, and a streak that just broke is not announced. Keep it
+that way if you add lines.
 
 Layout:
 

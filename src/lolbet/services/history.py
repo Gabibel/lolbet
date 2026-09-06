@@ -29,6 +29,7 @@ class PlayerForm:
     # Positif = victoires d'affilée, négatif = défaites d'affilée.
     streak: int = 0
     worst_deaths: int = 0
+    best_kills: int = 0
     best_score: float = 0.0
     mvp_count: int = 0
     lvp_count: int = 0
@@ -98,6 +99,7 @@ async def player_form(
         losses=sum(1 for r in rows if not r.win),
         streak=_streak([r.win for r in rows]),
         worst_deaths=max(r.deaths for r in rows),
+        best_kills=max(r.kills for r in rows),
         best_score=max(r.score for r in rows),
         mvp_count=sum(1 for r in rows if r.is_mvp),
         lvp_count=sum(1 for r in rows if r.is_lvp),
