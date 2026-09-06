@@ -100,8 +100,9 @@ approval takes a few days. Then raise `LOLBET_RATE_LIMIT_PER_SECOND` and
 ### Oracle Cloud Always Free ARM VM (recommended)
 
 The Always Free tier includes 4 Ampere A1 cores and 24 GB of RAM, permanently,
-with no card charge — far more than this bot needs. Create an
-`Ubuntu 22.04 (aarch64)` VM.Ampere A1 instance, then:
+with no card charge - far more than this bot needs. Create a
+`VM.Standard.A1.Flex` instance running **Ubuntu 24.04 (aarch64)**, which ships
+Python 3.12; Ubuntu 22.04 only has 3.10 and this project needs 3.12. Then:
 
 ```bash
 sudo adduser --system --group --home /opt/lolbet lolbet
