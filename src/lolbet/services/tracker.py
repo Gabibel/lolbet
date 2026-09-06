@@ -22,13 +22,18 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import discord
+from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
+from sqlalchemy import update as sql_update
 
 from ..logging_conf import get_logger
 from ..models import (
+    Bet,
     GameStatus,
     GuildConfig,
     Player,
+    PlayerGameStat,
+    RankSnapshot,
     TrackedGame,
     TrackedParticipant,
 )
@@ -486,23 +491,30 @@ class GameTracker:
         await self._drop_game(game_id)
 
     async def _drop_game(self, game_id: int) -> None:
+        """Supprime une partie et tout ce qui la reference.
+
+        L'ordre est explicite : SQLite applique les cles etrangeres et aucune
+        relation ORM n'est declaree entre ces tables, donc SQLAlchemy ne sait
+        pas dans quel ordre supprimer. Sans ca, la suppression echoue et laisse
+        une partie fantome qui ne pourra plus jamais etre annoncee.
+        """
         async with self._bot.session_factory() as session:
-            game = await session.get(TrackedGame, game_id)
-            if game is None:
-                return
-            participants = (
-                (
-                    await session.execute(
-                        select(TrackedParticipant).where(TrackedParticipant.game_id == game_id)
-                    )
+            for model in (Bet, PlayerGameStat, TrackedParticipant):
+                await session.execute(
+                    sql_delete(model).where(model.game_id == game_id)
                 )
-                .scalars()
-                .all()
+            # Un releve de rang survit a la partie : on le detache au lieu de
+            # perdre un point de progression.
+            await session.execute(
+                sql_update(RankSnapshot)
+                .where(RankSnapshot.game_id == game_id)
+                .values(game_id=None)
             )
-            for participant in participants:
-                await session.delete(participant)
-            await session.delete(game)
+            await session.execute(
+                sql_delete(TrackedGame).where(TrackedGame.id == game_id)
+            )
             await session.commit()
+        log.info("tracker.game_dropped", game_id=game_id)
 
     # -- maintenance loop -------------------------------------------------
 
