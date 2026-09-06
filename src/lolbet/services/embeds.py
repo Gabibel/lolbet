@@ -16,7 +16,12 @@ import discord
 from ..models import BetSide, GameStatus
 from ..riot.ddragon import DDragon
 from ..riot.rank import RankInfo, average_score, score_to_label
-from ..utils import discord_timestamp, format_ago, format_duration, format_points
+from ..utils import (
+    discord_timestamp,
+    format_duration,
+    format_points,
+    format_short_ago,
+)
 from .betting import Pool, Settlement
 from .scoring import MatchScores, PlayerScore
 
@@ -160,22 +165,33 @@ class GameCard:
 
 
 def _mastery_text(player: PlayerCard) -> str:
+    """``M7 47k (4h)`` - compact, la parenthèse est la dernière partie jouée."""
     if player.mastery_points is None:
         return ""
     level = f"M{player.mastery_level}" if player.mastery_level else "M-"
-    parts = [f"{level} {format_points(player.mastery_points)} pts"]
+    text = f"{level} {format_points(player.mastery_points)}"
     if player.mastery_last_played is not None:
-        parts.append(f"jouée {format_ago(player.mastery_last_played)}")
-    return " - ".join(parts)
+        text += f" ({format_short_ago(player.mastery_last_played)})"
+    return text
 
 
 def _player_line(player: PlayerCard, ddragon: DDragon) -> str:
+    """Une seule ligne par joueur : les dix tiennent dans un écran.
+
+    La mention Discord n'est volontairement pas répétée ici. La description de
+    l'embed dit déjà qui est suivi, et une mention longue décale toute la
+    colonne des statistiques.
+    """
     champion = ddragon.champion_name(player.champion_id)
     name = discord.utils.escape_markdown(player.riot_id)
-    marker = "**>**" if player.is_tracked else "\N{BULLET}"
-    head = f"{marker} `{champion:<12}` {name}"
-    if player.is_tracked and player.discord_id:
-        head += f" (<@{player.discord_id}>)"
+    marker = (
+        "\N{BLACK RIGHT-POINTING SMALL TRIANGLE}"
+        if player.is_tracked
+        else "\N{BULLET}"
+    )
+    # Le champion est en chasse fixe : c'est lui qui aligne les colonnes.
+    display = f"**{name}**" if player.is_tracked else name
+    head = f"{marker} `{champion:<12}` {display}"
 
     details: list[str] = []
     if player.rank is not None:
@@ -190,7 +206,8 @@ def _player_line(player: PlayerCard, ddragon: DDragon) -> str:
 
     if not details:
         return head
-    return f"{head}\n {' • '.join(details)}"
+    separator = " \N{BULLET} "
+    return f"{head} \N{EM DASH} {separator.join(details)}"
 
 
 def _team_field_value(players: list[PlayerCard], ddragon: DDragon) -> str:

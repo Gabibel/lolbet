@@ -11,7 +11,13 @@ from lolbet.riot.rank import (
     solo_queue_rank,
 )
 from lolbet.services.enrichment import base_card, find_team_id, parse_riot_id
-from lolbet.utils import format_ago, format_duration, format_points, from_epoch_ms
+from lolbet.utils import (
+    format_ago,
+    format_duration,
+    format_points,
+    format_short_ago,
+    from_epoch_ms,
+)
 from lolbet.views import AmountError, parse_amount
 
 # -- ranks -----------------------------------------------------------------
@@ -196,13 +202,26 @@ def test_format_duration_reads_like_a_game_clock():
     assert format_duration(3661) == "1h 01m 01s"
 
 
-def test_format_ago_is_human():
+def test_format_ago_reads_in_french():
+    """Un bot francophone ne dit pas « 4h ago »."""
     from datetime import UTC, datetime, timedelta
 
     now = datetime(2026, 1, 10, tzinfo=UTC)
-    assert format_ago(now - timedelta(minutes=30), now=now) == "30m ago"
-    assert format_ago(now - timedelta(days=2), now=now) == "2d ago"
-    assert format_ago(None) == "never"
+    assert format_ago(now - timedelta(minutes=30), now=now) == "il y a 30min"
+    assert format_ago(now - timedelta(days=2), now=now) == "il y a 2j"
+    assert format_ago(now - timedelta(seconds=5), now=now) == "à l'instant"
+    assert format_ago(None) == "jamais"
+
+
+def test_format_short_ago_is_bare():
+    """Version nue pour les listes denses : pas de « il y a »."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime(2026, 1, 10, tzinfo=UTC)
+    assert format_short_ago(now - timedelta(hours=4), now=now) == "4h"
+    assert format_short_ago(now - timedelta(days=38), now=now) == "38j"
+    assert format_short_ago(now - timedelta(days=400), now=now) == "1an"
+    assert format_short_ago(None) == "?"
 
 
 # -- lock notice -----------------------------------------------------------

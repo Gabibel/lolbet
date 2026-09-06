@@ -48,23 +48,31 @@ def format_coins(value: int) -> str:
     return f"{value:,}".replace(",", " ")
 
 
-def format_ago(moment: datetime | None, *, now: datetime | None = None) -> str:
-    """Compact "how long ago", e.g. 2d ago. Never raises on odd input."""
+def format_short_ago(moment: datetime | None, *, now: datetime | None = None) -> str:
+    """Durée nue, pour les listes denses : ``4h``, ``2j``, ``1an``."""
     moment = as_utc(moment)
     if moment is None:
-        return "never"
+        return "?"
     now = as_utc(now) or utcnow()
     delta = (now - moment).total_seconds()
-    if delta < 0:
-        return "just now"
+    if delta < 60:
+        return "à l'instant"
     if delta < 3600:
-        return f"{int(delta // 60)}m ago"
+        return f"{int(delta // 60)}min"
     if delta < 86400:
-        return f"{int(delta // 3600)}h ago"
+        return f"{int(delta // 3600)}h"
     days = int(delta // 86400)
     if days < 365:
-        return f"{days}d ago"
-    return f"{days // 365}y ago"
+        return f"{days}j"
+    return f"{days // 365}an"
+
+
+def format_ago(moment: datetime | None, *, now: datetime | None = None) -> str:
+    """Durée en toutes lettres, pour les phrases : ``il y a 2j``."""
+    if moment is None:
+        return "jamais"
+    short = format_short_ago(moment, now=now)
+    return short if short == "à l'instant" else f"il y a {short}"
 
 
 def discord_timestamp(moment: datetime, style: str = "R") -> str:
