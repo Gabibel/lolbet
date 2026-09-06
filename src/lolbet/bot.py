@@ -77,6 +77,15 @@ class LoLBet(commands.Bot):
                 self.tree.copy_global_to(guild=guild)
                 synced = await self.tree.sync(guild=guild)
                 log.info("commands.synced", scope="guild", count=len(synced))
+
+                # Commands previously synced globally survive until the global
+                # set is rewritten. A command deleted from the code would keep
+                # showing up, since a guild command only masks a global one of
+                # the same name. Guild sync targets a single server anyway, so
+                # emptying the global set is the honest end state.
+                self.tree.clear_commands(guild=None)
+                await self.tree.sync()
+                log.info("commands.global_cleared")
             else:
                 synced = await self.tree.sync()
                 log.info("commands.synced", scope="global", count=len(synced))
