@@ -253,8 +253,8 @@ def _odds_value(pool: Pool, tracked_team_name: str, labels: SideLabels) -> str:
         else ""
     )
     return (
-        f"{' • '.join(rows)}\nCagnotte : **{pool.total:,}** pièces, "
-        f"0% de commission{backing}"
+        f"{' • '.join(rows)}\nCagnotte : **{pool.total:,}** pièces • "
+        f"cote figée au moment du pari{backing}"
     )
 
 
@@ -454,10 +454,9 @@ def _payout_value(settlement: Settlement, labels: SideLabels | None = None) -> s
             "remboursées."
         )
     if not settlement.paid:
-        # Depuis la banque, se tromper coûte même quand personne n'a vu juste.
         return (
             f"Personne n'avait misé du bon côté : les {settlement.pool.total:,} "
-            "pièces sont perdues."
+            "pièces vont à la banque."
         )
     lines = [
         f"Cagnotte **{settlement.pool.total:,}** pièces • côté gagnant : "

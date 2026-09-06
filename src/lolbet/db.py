@@ -61,10 +61,35 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
+# Colonnes ajoutees apres coup. create_all ne touche pas aux tables qui
+# existent deja, donc une nouvelle colonne doit etre ajoutee a la main.
+ADDED_COLUMNS: dict[tuple[str, str], str] = {
+    ("bet", "odds"): "FLOAT NOT NULL DEFAULT 0",
+}
+
+
+async def ensure_columns(engine: AsyncEngine) -> list[str]:
+    """Ajoute les colonnes manquantes aux tables existantes."""
+    added: list[str] = []
+    async with engine.begin() as conn:
+        for (table, column), ddl in ADDED_COLUMNS.items():
+            rows = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
+            if column in {row[1] for row in rows}:
+                continue
+            await conn.exec_driver_sql(
+                f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"
+            )
+            added.append(f"{table}.{column}")
+    if added:
+        log.info("database.migrated", columns=added)
+    return added
+
+
 async def init_db(engine: AsyncEngine) -> None:
     """Create tables if they do not exist. No migration tool, no service."""
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+    await ensure_columns(engine)
     log.info("database.ready", url=str(engine.url).split("///")[-1])
 
 

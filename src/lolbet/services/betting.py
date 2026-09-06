@@ -1,13 +1,21 @@
-"""Virtual-currency parimutuel betting.
+"""Paris en monnaie virtuelle, a cotes fixes.
 
-There is no real money anywhere in this bot and no path to add any. Coins are
-rows in a local SQLite file.
+Aucun argent reel n'intervient et rien ne permet d'en ajouter : les pieces
+sont des lignes dans un fichier SQLite local.
 
-Pool rules:
-  payout = stake * (total_pool / winning_side_pool), 0% rake.
-Payouts are integers, and the rounding remainder is handed out largest-
-remainder style so the pool is conserved to the coin instead of quietly
-evaporating.
+Modele de bookmaker plutot que parimutuel :
+
+* la cote d'un camp suit l'argent mise dessus - plus il est charge, moins il
+  paie - via une probabilite implicite lissee par une mise virtuelle ;
+* la cote est **figee au moment du pari**. Celle affichee plus tard, apres que
+  d'autres ont mise, ne change pas ce qui te sera paye ;
+* la banque est la contrepartie : elle paie les gagnants et encaisse les
+  perdants. Il y a donc toujours un gain ou une perte, jamais un remboursement.
+
+Le parimutuel precedent avait un defaut fatal a six joueurs : quand tout le
+monde misait du meme cote, la cagnotte ne contenait que les mises des gagnants
+et leur etait rendue telle quelle - et sans personne du bon cote, tout etait
+rembourse. Parier ne coutait ni ne rapportait rien.
 """
 
 from __future__ import annotations
@@ -58,9 +66,9 @@ class Pool:
     loss_amount: int = 0
     win_count: int = 0
     loss_count: int = 0
-    # Plancher garanti par la banque, applique a l'affichage comme au
-    # paiement pour que la cote annoncee soit celle qui sera payee.
-    min_multiplier: float = 1.0
+    # Cotes proposees en cet instant. Un pari place maintenant les fige.
+    win_odds: float = 0.0
+    loss_odds: float = 0.0
 
     @property
     def total(self) -> int:
@@ -71,11 +79,9 @@ class Pool:
         return self.win_count + self.loss_count
 
     def multiplier(self, side: str) -> float | None:
-        """Ce que rapporte une piece misee sur ``side`` s'il gagne."""
-        side_amount = self.win_amount if side == BetSide.WIN else self.loss_amount
-        if side_amount <= 0 or self.total <= 0:
-            return None
-        return max(self.total / side_amount, self.min_multiplier)
+        """Cote actuelle du camp : ce que rapporterait une mise placee la."""
+        odds = self.win_odds if side == BetSide.WIN else self.loss_odds
+        return odds if odds > 0 else None
 
     def implied_probability(self, side: str) -> float | None:
         """Share of the pool on this side. This is what bettors believe,
@@ -86,26 +92,25 @@ class Pool:
         return side_amount / self.total
 
 
-def compute_payouts(stakes: dict[int, int], winning_total: int, pool_total: int) -> dict[int, int]:
-    """Split ``pool_total`` across winning stakes, conserving every coin.
+def compute_odds(
+    side_amount: int,
+    total_amount: int,
+    *,
+    seed: int,
+    margin: float,
+    minimum: float,
+    maximum: float,
+) -> float:
+    """Cote d'un camp d'apres l'argent deja mise.
 
-    ``stakes`` maps bet id -> stake for the winning side only.
+    La mise virtuelle ``seed`` sert d'a priori : elle donne une cote
+    d'ouverture symetrique quand personne n'a encore parie, et empeche une
+    cote absurde des le premier pari. Plus un camp est charge, plus sa
+    probabilite implicite monte, donc moins il paie.
     """
-    if not stakes or winning_total <= 0:
-        return {}
-    exact = {bet_id: stake * pool_total / winning_total for bet_id, stake in stakes.items()}
-    payouts = {bet_id: int(value) for bet_id, value in exact.items()}
-    remainder = pool_total - sum(payouts.values())
-    if remainder > 0:
-        # Largest fractional part first; ties broken by the bigger stake.
-        order = sorted(
-            exact,
-            key=lambda bet_id: (exact[bet_id] - payouts[bet_id], stakes[bet_id]),
-            reverse=True,
-        )
-        for bet_id in order[:remainder]:
-            payouts[bet_id] += 1
-    return payouts
+    probability = (side_amount + seed) / (total_amount + 2 * seed)
+    fair = 1.0 / probability
+    return round(max(minimum, min(maximum, fair * (1.0 - margin))), 2)
 
 
 @dataclass(slots=True)
@@ -184,13 +189,37 @@ class BettingService:
         totals = {side: (int(amount or 0), int(count or 0)) for side, amount, count in rows}
         win_amount, win_count = totals.get(BetSide.WIN, (0, 0))
         loss_amount, loss_count = totals.get(BetSide.LOSS, (0, 0))
-        return Pool(
-            win_amount=win_amount,
-            loss_amount=loss_amount,
-            win_count=win_count,
-            loss_count=loss_count,
-            min_multiplier=self._settings.house_min_multiplier,
+        return self._with_odds(
+            Pool(
+                win_amount=win_amount,
+                loss_amount=loss_amount,
+                win_count=win_count,
+                loss_count=loss_count,
+            )
         )
+
+    def _with_odds(self, pool: Pool) -> Pool:
+        """Renseigne les cotes proposees pour cette repartition."""
+        settings = self._settings
+        options = {
+            "seed": settings.odds_seed_coins,
+            "margin": settings.odds_margin,
+            "minimum": settings.odds_min,
+            "maximum": settings.odds_max,
+        }
+        return Pool(
+            win_amount=pool.win_amount,
+            loss_amount=pool.loss_amount,
+            win_count=pool.win_count,
+            loss_count=pool.loss_count,
+            win_odds=compute_odds(pool.win_amount, pool.total, **options),
+            loss_odds=compute_odds(pool.loss_amount, pool.total, **options),
+        )
+
+    async def odds_for(self, session: AsyncSession, game_id: int, side: str) -> float:
+        """Cote qu'un pari place maintenant figerait."""
+        pool = await self.pool(session, game_id)
+        return pool.multiplier(side) or self._settings.odds_min
 
     async def bets_for_game(self, session: AsyncSession, game_id: int) -> list[Bet]:
         result = await session.execute(
@@ -240,6 +269,10 @@ class BettingService:
                 "si tu veux changer."
             )
 
+        # La cote est lue AVANT d'ajouter la mise : parier ne doit pas
+        # deplacer sa propre cote.
+        odds = await self.odds_for(session, int(game.id or 0), side)
+
         wallet = await self.get_wallet(session, game.guild_id, user_id)
         if wallet.balance < amount:
             raise InsufficientFunds(
@@ -257,6 +290,7 @@ class BettingService:
             user_id=user_id,
             side=side,
             amount=amount,
+            odds=odds,
         )
         session.add(wallet)
         session.add(bet)
@@ -299,22 +333,11 @@ class BettingService:
         losers = [b for b in bets if b.side != winning_side and b.settled_at is None]
         now = utcnow()
 
-        # Personne du bon cote : les mises sont perdues, pas rendues. Sans
-        # ca, se tromper a plusieurs du meme cote ne coute jamais rien.
-        winning_total = sum(b.amount for b in winners)
-        stakes = {int(b.id or 0): b.amount for b in winners}
-        payouts = compute_payouts(stakes, winning_total, pool.total)
-        # La banque comble la difference quand le parimutuel seul rendrait
-        # moins que la cote plancher.
-        floor = self._settings.house_min_multiplier
-        for bet in winners:
-            minimum = int(bet.amount * floor)
-            bet_id = int(bet.id or 0)
-            payouts[bet_id] = max(payouts.get(bet_id, bet.amount), minimum)
-
         paid: list[tuple[int, int, int]] = []
         for bet in winners:
-            payout = payouts.get(int(bet.id or 0), bet.amount)
+            # Chacun est paye a SA cote, celle figee quand il a mise.
+            odds = bet.odds if bet.odds > 1 else self._settings.odds_min
+            payout = int(bet.amount * odds)
             wallet = await self.get_wallet(session, game.guild_id, bet.user_id)
             wallet.balance += payout
             wallet.bets_won += 1

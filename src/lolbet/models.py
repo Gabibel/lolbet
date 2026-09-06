@@ -150,6 +150,9 @@ class Bet(SQLModel, table=True):
     user_id: int = Field(sa_column=Column(BigInteger, nullable=False))
     side: str = Field(max_length=8)
     amount: int
+    # Cote figee au moment du pari : c'est elle qui sera payee, pas
+    # celle affichee plus tard quand d'autres auront mise.
+    odds: float = 0.0
     created_at: datetime = Field(default_factory=utcnow)
     payout: int | None = None
     settled_at: datetime | None = None

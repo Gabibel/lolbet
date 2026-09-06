@@ -237,7 +237,10 @@ def test_lock_embed_lists_both_sides_and_their_bettors():
     from lolbet.services.betting import Pool
     from lolbet.services.embeds import build_lock_embed
 
-    pool = Pool(win_amount=300, loss_amount=100, win_count=2, loss_count=1)
+    pool = Pool(
+        win_amount=300, loss_amount=100, win_count=2, loss_count=1,
+        win_odds=1.33, loss_odds=4.0,
+    )
     bets = [
         _FakeBet(11, BetSide.WIN, 200),
         _FakeBet(22, BetSide.WIN, 100),

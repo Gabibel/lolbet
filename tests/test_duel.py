@@ -264,7 +264,10 @@ def test_panel_shows_the_balance_and_the_commands():
 
 
 def test_panel_shows_the_current_odds_and_pool():
-    pool = Pool(win_amount=300, loss_amount=100, win_count=2, loss_count=1)
+    pool = Pool(
+        win_amount=300, loss_amount=100, win_count=2, loss_count=1,
+        win_odds=1.33, loss_odds=4.0,
+    )
     text = bet_panel_text(BetSide.WIN, 500, pool)
     assert "x1.33" in text
     assert "400" in text

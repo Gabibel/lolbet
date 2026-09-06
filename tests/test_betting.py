@@ -1,4 +1,4 @@
-"""Parimutuel pool maths and the wallet lifecycle."""
+"""Cotes à la bookmaker, et cycle de vie du portefeuille."""
 
 from __future__ import annotations
 
@@ -6,19 +6,23 @@ from datetime import timedelta
 
 import pytest
 
-from lolbet.models import BetSide, GameStatus, TrackedGame
+from lolbet.models import Bet, BetSide, GameStatus, TrackedGame
 from lolbet.services.betting import (
     BetsClosed,
     DuplicateBet,
     InsufficientFunds,
     InvalidAmount,
     Pool,
-    compute_payouts,
+    compute_odds,
 )
 from lolbet.utils import utcnow
 
 GUILD = 1234
 ALICE, BOB, CAROL = 11, 22, 33
+
+# Les réglages par défaut, repris ici pour que les valeurs attendues soient
+# lisibles sans aller les chercher.
+ODDS = {"seed": 100, "margin": 0.05, "minimum": 1.05, "maximum": 10.0}
 
 
 async def make_game(session_factory, *, status: str = GameStatus.LIVE, lock_in: int = 300):
@@ -40,53 +44,78 @@ async def make_game(session_factory, *, status: str = GameStatus.LIVE, lock_in: 
         return game
 
 
-# -- pure maths ------------------------------------------------------------
+async def bet_of(session_factory, game_id: int, user_id: int) -> Bet:
+    async with session_factory() as session:
+        from sqlalchemy import select
+
+        return (
+            await session.execute(
+                select(Bet).where(Bet.game_id == game_id, Bet.user_id == user_id)
+            )
+        ).scalar_one()
 
 
-def test_payout_formula_is_stake_times_pool_over_winning_side():
-    # 100 on the winning side, 300 in the pool -> x3.
-    payouts = compute_payouts({1: 100}, winning_total=100, pool_total=300)
-    assert payouts == {1: 300}
+# -- la cote --------------------------------------------------------------
 
 
-def test_payouts_split_proportionally():
-    payouts = compute_payouts({1: 100, 2: 300}, winning_total=400, pool_total=800)
-    assert payouts == {1: 200, 2: 600}
+def test_an_empty_market_opens_symmetrically():
+    """Personne n'a misé : les deux camps paient pareil."""
+    assert compute_odds(0, 0, **ODDS) == pytest.approx(1.9)
 
 
-def test_rounding_remainder_is_distributed_not_burned():
-    """Three winners on a pool that does not divide evenly must still add up."""
-    payouts = compute_payouts({1: 1, 2: 1, 3: 1}, winning_total=3, pool_total=10)
-    assert sum(payouts.values()) == 10
-    assert sorted(payouts.values()) == [3, 3, 4]
+def test_money_on_a_side_lowers_its_odds():
+    """C'est tout l'intérêt : la cote suit l'argent."""
+    loaded = compute_odds(500, 500, **ODDS)
+    light = compute_odds(0, 500, **ODDS)
+    assert loaded < 1.9 < light
+    assert loaded == pytest.approx(1.11)
+    assert light == pytest.approx(6.65)
 
 
-def test_no_winners_means_no_payouts():
-    assert compute_payouts({}, winning_total=0, pool_total=500) == {}
+def test_odds_move_step_by_step():
+    steps = [compute_odds(amount, amount, **ODDS) for amount in (0, 100, 200, 500)]
+    assert steps == sorted(steps, reverse=True)  # de plus en plus chargé, paie de moins en moins
 
 
-def test_pool_multipliers_and_implied_probability():
-    pool = Pool(win_amount=300, loss_amount=100, win_count=2, loss_count=1)
+def test_a_balanced_market_is_back_to_even():
+    assert compute_odds(500, 1000, **ODDS) == pytest.approx(1.9)
+
+
+def test_odds_are_clamped():
+    assert compute_odds(0, 10**9, **ODDS) == 10.0
+    assert compute_odds(10**9, 10**9, **ODDS) == 1.05
+
+
+def test_the_margin_is_what_the_house_keeps():
+    fair = compute_odds(0, 0, **{**ODDS, "margin": 0.0})
+    with_margin = compute_odds(0, 0, **ODDS)
+    assert fair == pytest.approx(2.0)
+    assert with_margin < fair
+
+
+def test_the_seed_decides_how_fast_odds_move():
+    """Une petite mise virtuelle rend le marché plus nerveux."""
+    nervous = compute_odds(100, 100, **{**ODDS, "seed": 10})
+    calm = compute_odds(100, 100, **{**ODDS, "seed": 1000})
+    assert nervous < calm
+
+
+def test_pool_exposes_its_odds_and_implied_probability():
+    pool = Pool(
+        win_amount=300, loss_amount=100, win_count=2, loss_count=1,
+        win_odds=1.42, loss_odds=2.85,
+    )
     assert pool.total == 400
-    assert pool.multiplier(BetSide.WIN) == pytest.approx(400 / 300)
-    assert pool.multiplier(BetSide.LOSS) == pytest.approx(4.0)
+    assert pool.multiplier(BetSide.WIN) == pytest.approx(1.42)
+    assert pool.multiplier(BetSide.LOSS) == pytest.approx(2.85)
     assert pool.implied_probability(BetSide.WIN) == pytest.approx(0.75)
 
 
-def test_empty_pool_has_no_odds():
-    pool = Pool()
-    assert pool.multiplier(BetSide.WIN) is None
-    assert pool.implied_probability(BetSide.WIN) is None
+def test_a_pool_without_odds_reports_none():
+    assert Pool().multiplier(BetSide.WIN) is None
 
 
-def test_zero_rake_conserves_the_pool():
-    stakes = {1: 137, 2: 42, 3: 991}
-    total = sum(stakes.values()) + 555  # losing side
-    payouts = compute_payouts(stakes, sum(stakes.values()), total)
-    assert sum(payouts.values()) == total
-
-
-# -- placing bets ----------------------------------------------------------
+# -- placer un pari --------------------------------------------------------
 
 
 async def test_place_bet_moves_coins_into_escrow(session_factory, betting):
@@ -96,8 +125,47 @@ async def test_place_bet_moves_coins_into_escrow(session_factory, betting):
         await session.commit()
 
     assert bet.amount == 250
-    assert wallet.balance == 750  # 1000 starting - 250 staked
+    assert wallet.balance == 750
     assert wallet.total_wagered == 250
+
+
+async def test_the_odds_are_frozen_when_the_bet_is_placed(session_factory, betting):
+    """Le premier parieur garde 1.90 même quand la cote descend ensuite."""
+    game = await make_game(session_factory)
+    async with session_factory() as session:
+        await betting.place_bet(session, game, ALICE, BetSide.WIN, 100)
+        await session.commit()
+    async with session_factory() as session:
+        await betting.place_bet(session, game, BOB, BetSide.WIN, 100)
+        await session.commit()
+
+    alice = await bet_of(session_factory, game.id, ALICE)
+    bob = await bet_of(session_factory, game.id, BOB)
+    assert alice.odds == pytest.approx(1.9)
+    assert bob.odds == pytest.approx(1.42)  # le camp s'est chargé entre-temps
+
+
+async def test_your_own_bet_does_not_move_your_own_odds(session_factory, betting):
+    game = await make_game(session_factory)
+    async with session_factory() as session:
+        await betting.place_bet(session, game, ALICE, BetSide.WIN, 5000 // 10)
+        await session.commit()
+    alice = await bet_of(session_factory, game.id, ALICE)
+    assert alice.odds == pytest.approx(1.9)
+
+
+async def test_betting_against_the_crowd_pays_more(session_factory, betting):
+    game = await make_game(session_factory)
+    async with session_factory() as session:
+        await betting.place_bet(session, game, ALICE, BetSide.WIN, 500)
+        await session.commit()
+    async with session_factory() as session:
+        await betting.place_bet(session, game, BOB, BetSide.LOSS, 100)
+        await session.commit()
+
+    alice = await bet_of(session_factory, game.id, ALICE)
+    bob = await bet_of(session_factory, game.id, BOB)
+    assert bob.odds > alice.odds
 
 
 async def test_one_position_per_user_per_game(session_factory, betting):
@@ -105,7 +173,6 @@ async def test_one_position_per_user_per_game(session_factory, betting):
     async with session_factory() as session:
         await betting.place_bet(session, game, ALICE, BetSide.WIN, 100)
         await session.commit()
-
     async with session_factory() as session:
         with pytest.raises(DuplicateBet):
             await betting.place_bet(session, game, ALICE, BetSide.LOSS, 100)
@@ -147,14 +214,12 @@ async def test_cancel_returns_the_stake(session_factory, betting):
     async with session_factory() as session:
         await betting.place_bet(session, game, ALICE, BetSide.WIN, 400)
         await session.commit()
-
     async with session_factory() as session:
         _, wallet = await betting.cancel_bet(session, game, ALICE)
         await session.commit()
 
     assert wallet.balance == 1000
     assert wallet.total_wagered == 0
-
     async with session_factory() as session:
         assert await betting.get_bet(session, game.id, ALICE) is None
 
@@ -164,7 +229,6 @@ async def test_cancel_is_refused_after_lock(session_factory, betting):
     async with session_factory() as session:
         await betting.place_bet(session, game, ALICE, BetSide.WIN, 100)
         await session.commit()
-
     async with session_factory() as session:
         locked = await session.get(TrackedGame, game.id)
         locked.status = GameStatus.LOCKED
@@ -172,14 +236,18 @@ async def test_cancel_is_refused_after_lock(session_factory, betting):
             await betting.cancel_bet(session, locked, ALICE)
 
 
-# -- settlement ------------------------------------------------------------
+# -- règlement -------------------------------------------------------------
 
 
-async def test_winners_split_the_whole_pool(session_factory, betting):
+async def test_each_winner_is_paid_at_his_own_odds(session_factory, betting):
     game = await make_game(session_factory)
     async with session_factory() as session:
-        await betting.place_bet(session, game, ALICE, BetSide.WIN, 100)
-        await betting.place_bet(session, game, BOB, BetSide.WIN, 100)
+        await betting.place_bet(session, game, ALICE, BetSide.WIN, 100)  # 1.90
+        await session.commit()
+    async with session_factory() as session:
+        await betting.place_bet(session, game, BOB, BetSide.WIN, 100)  # 1.42
+        await session.commit()
+    async with session_factory() as session:
         await betting.place_bet(session, game, CAROL, BetSide.LOSS, 200)
         await session.commit()
 
@@ -188,43 +256,63 @@ async def test_winners_split_the_whole_pool(session_factory, betting):
         settlement = await betting.settle(session, stored, tracked_team_won=True)
         await session.commit()
 
-    assert settlement.winning_side == BetSide.WIN
-    assert settlement.pool.total == 400
-    assert settlement.total_paid == 400  # 0% rake, nothing evaporates
-    assert {payout for _, _, payout in settlement.paid} == {200}
+    payouts = {user: payout for user, _, payout in settlement.paid}
+    assert payouts[ALICE] == 190
+    assert payouts[BOB] == 142
 
     async with session_factory() as session:
         alice = await betting.get_wallet(session, GUILD, ALICE)
         carol = await betting.get_wallet(session, GUILD, CAROL)
-    assert alice.balance == 900 + 200  # 1000 - 100 stake + 200 payout
-    assert alice.bets_won == 1
-    assert alice.net_profit == 100
+    assert alice.balance == 900 + 190
+    assert alice.net_profit == 90
     assert carol.balance == 800
     assert carol.bets_lost == 1
     assert carol.net_profit == -200
 
 
-async def test_a_lone_winner_takes_everything(session_factory, betting):
+async def test_a_lone_bettor_who_is_right_gains(session_factory, betting):
+    """Le cas qui ne rapportait rien en parimutuel."""
     game = await make_game(session_factory)
     async with session_factory() as session:
-        await betting.place_bet(session, game, ALICE, BetSide.LOSS, 50)
-        await betting.place_bet(session, game, BOB, BetSide.WIN, 450)
+        await betting.place_bet(session, game, ALICE, BetSide.WIN, 100)
+        await session.commit()
+    async with session_factory() as session:
+        stored = await session.get(TrackedGame, game.id)
+        settlement = await betting.settle(session, stored, tracked_team_won=True)
         await session.commit()
 
+    assert settlement.paid[0][2] == 190
+    async with session_factory() as session:
+        alice = await betting.get_wallet(session, GUILD, ALICE)
+    assert alice.balance == 1090
+
+
+async def test_a_lone_bettor_who_is_wrong_loses(session_factory, betting):
+    """Et celui qui était remboursé auparavant."""
+    game = await make_game(session_factory)
+    async with session_factory() as session:
+        await betting.place_bet(session, game, ALICE, BetSide.WIN, 100)
+        await session.commit()
     async with session_factory() as session:
         stored = await session.get(TrackedGame, game.id)
         settlement = await betting.settle(session, stored, tracked_team_won=False)
         await session.commit()
 
-    assert settlement.total_paid == 500
-    assert settlement.paid[0][0] == ALICE
+    assert settlement.paid == []
+    assert settlement.refunded is False
+    async with session_factory() as session:
+        alice = await betting.get_wallet(session, GUILD, ALICE)
+    assert alice.balance == 900
+    assert alice.net_profit == -100
 
 
-async def test_nobody_on_the_winning_side_loses_everything(session_factory, betting):
-    """Se tromper a plusieurs du meme cote doit couter, pas etre rembourse."""
+async def test_everyone_on_the_same_losing_side_loses(session_factory, betting):
+    """Deux joueurs, même camp, mauvais choix : plus de remboursement."""
     game = await make_game(session_factory)
     async with session_factory() as session:
         await betting.place_bet(session, game, ALICE, BetSide.WIN, 300)
+        await session.commit()
+    async with session_factory() as session:
         await betting.place_bet(session, game, BOB, BetSide.WIN, 200)
         await session.commit()
 
@@ -233,20 +321,20 @@ async def test_nobody_on_the_winning_side_loses_everything(session_factory, bett
         settlement = await betting.settle(session, stored, tracked_team_won=False)
         await session.commit()
 
-    assert settlement.refunded is False
     assert settlement.paid == []
     assert len(settlement.lost) == 2
     async with session_factory() as session:
         alice = await betting.get_wallet(session, GUILD, ALICE)
-    assert alice.balance == 700  # 1000 - 300 mises, rien ne revient
-    assert alice.net_profit == -300
+    assert alice.balance == 700
 
 
-async def test_a_lone_correct_bettor_still_gains(session_factory, betting):
-    """Sans la banque, le parimutuel rendrait exactement la mise : x1.00."""
+async def test_everyone_on_the_same_winning_side_gains(session_factory, betting):
     game = await make_game(session_factory)
     async with session_factory() as session:
         await betting.place_bet(session, game, ALICE, BetSide.WIN, 100)
+        await session.commit()
+    async with session_factory() as session:
+        await betting.place_bet(session, game, BOB, BetSide.WIN, 100)
         await session.commit()
 
     async with session_factory() as session:
@@ -254,19 +342,19 @@ async def test_a_lone_correct_bettor_still_gains(session_factory, betting):
         settlement = await betting.settle(session, stored, tracked_team_won=True)
         await session.commit()
 
-    payout = settlement.paid[0][2]
-    assert payout == 120  # plancher x1.20 comble par la banque
-    async with session_factory() as session:
-        alice = await betting.get_wallet(session, GUILD, ALICE)
-    assert alice.balance == 1020
-    assert alice.net_profit == 20
+    assert all(payout > stake for _, stake, payout in settlement.paid)
 
 
-async def test_everyone_on_the_winning_side_still_gains(session_factory, betting):
+async def test_a_bet_without_stored_odds_falls_back(session_factory, betting):
+    """Les paris d'avant la migration n'ont pas de cote enregistrée."""
     game = await make_game(session_factory)
     async with session_factory() as session:
         await betting.place_bet(session, game, ALICE, BetSide.WIN, 100)
-        await betting.place_bet(session, game, BOB, BetSide.WIN, 400)
+        await session.commit()
+    async with session_factory() as session:
+        legacy = await betting.get_bet(session, game.id, ALICE)
+        legacy.odds = 0.0
+        session.add(legacy)
         await session.commit()
 
     async with session_factory() as session:
@@ -274,47 +362,16 @@ async def test_everyone_on_the_winning_side_still_gains(session_factory, betting
         settlement = await betting.settle(session, stored, tracked_team_won=True)
         await session.commit()
 
-    payouts = {user: payout for user, _, payout in settlement.paid}
-    assert payouts[ALICE] == 120
-    assert payouts[BOB] == 480
+    assert settlement.paid[0][2] == 105  # cote minimale, jamais moins que la mise
 
 
-async def test_the_floor_never_lowers_a_better_payout(session_factory, betting):
-    """Quand les perdants ont alimente la cagnotte, le parimutuel prime."""
-    game = await make_game(session_factory)
-    async with session_factory() as session:
-        await betting.place_bet(session, game, ALICE, BetSide.WIN, 100)
-        await betting.place_bet(session, game, BOB, BetSide.LOSS, 900)
-        await session.commit()
-
-    async with session_factory() as session:
-        stored = await session.get(TrackedGame, game.id)
-        settlement = await betting.settle(session, stored, tracked_team_won=True)
-        await session.commit()
-
-    # 1000 de cagnotte pour 100 mises du bon cote : x10, bien au-dessus de x1.2
-    assert settlement.paid[0][2] == 1000
-
-
-def test_the_displayed_odds_respect_the_floor():
-    """La cote annoncee doit etre celle qui sera payee."""
-    lonely = Pool(win_amount=500, loss_amount=0, win_count=1, min_multiplier=1.2)
-    assert lonely.multiplier(BetSide.WIN) == pytest.approx(1.2)
-
-    contested = Pool(win_amount=100, loss_amount=900, win_count=1, loss_count=1,
-                     min_multiplier=1.2)
-    assert contested.multiplier(BetSide.WIN) == pytest.approx(10.0)
-
-
-def test_a_side_with_no_bets_has_no_odds_yet():
-    empty = Pool(win_amount=100, loss_amount=0, win_count=1, min_multiplier=1.2)
-    assert empty.multiplier(BetSide.LOSS) is None
-
-
-async def test_void_refunds_every_bet(session_factory, betting):
+async def test_void_still_refunds_everyone(session_factory, betting):
+    """Une partie annulée n'est pas un résultat : tout est rendu."""
     game = await make_game(session_factory)
     async with session_factory() as session:
         await betting.place_bet(session, game, ALICE, BetSide.WIN, 120)
+        await session.commit()
+    async with session_factory() as session:
         await betting.place_bet(session, game, BOB, BetSide.LOSS, 80)
         await session.commit()
 
@@ -334,6 +391,8 @@ async def test_settlement_does_not_pay_twice(session_factory, betting):
     game = await make_game(session_factory)
     async with session_factory() as session:
         await betting.place_bet(session, game, ALICE, BetSide.WIN, 100)
+        await session.commit()
+    async with session_factory() as session:
         await betting.place_bet(session, game, BOB, BetSide.LOSS, 100)
         await session.commit()
 
@@ -341,19 +400,18 @@ async def test_settlement_does_not_pay_twice(session_factory, betting):
         stored = await session.get(TrackedGame, game.id)
         await betting.settle(session, stored, tracked_team_won=True)
         await session.commit()
-
     async with session_factory() as session:
         stored = await session.get(TrackedGame, game.id)
         second = await betting.settle(session, stored, tracked_team_won=True)
         await session.commit()
 
-    assert second.paid == []  # already settled bets are skipped
+    assert second.paid == []
     async with session_factory() as session:
         alice = await betting.get_wallet(session, GUILD, ALICE)
-    assert alice.balance == 1100
+    assert alice.balance == 900 + 190
 
 
-# -- daily -----------------------------------------------------------------
+# -- quotidien et classement ----------------------------------------------
 
 
 async def test_daily_grants_then_goes_on_cooldown(session_factory, betting):
