@@ -80,16 +80,38 @@ class LoLBet(commands.Bot):
             else:
                 synced = await self.tree.sync()
                 log.info("commands.synced", scope="global", count=len(synced))
+        except discord.Forbidden as exc:  # pragma: no cover - network
+            log.error(
+                "commands.sync_forbidden",
+                error=str(exc),
+                scope="guild" if self.settings.dev_guild_id else "global",
+                hint=(
+                    "check LOLBET_DEV_GUILD_ID, or invite the bot with the "
+                    "applications.commands scope"
+                ),
+            )
         except discord.HTTPException as exc:  # pragma: no cover - network
             log.warning("commands.sync_failed", error=str(exc))
 
     async def on_ready(self) -> None:
+        guild_ids = [guild.id for guild in self.guilds]
         log.info(
             "bot.ready",
             user=str(self.user),
             guilds=len(self.guilds),
+            guild_ids=guild_ids[:10],
             ddragon=self.ddragon.version,
         )
+        # A guild-scoped sync fails with 403 when the id does not match a guild
+        # the bot is actually in - usually a channel id copied by mistake.
+        dev_guild = self.settings.dev_guild_id
+        if dev_guild and dev_guild not in guild_ids:
+            log.error(
+                "bot.dev_guild_mismatch",
+                configured=dev_guild,
+                actual=guild_ids[:10],
+                hint="LOLBET_DEV_GUILD_ID is not a server this bot is in",
+            )
 
     async def close(self) -> None:
         log.info("bot.closing")
