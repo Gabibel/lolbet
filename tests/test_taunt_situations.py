@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import pytest
 
+from lolbet.models import RankSnapshot
 from lolbet.services.history import PlayerForm
+from lolbet.services.progression import RankChange
 from lolbet.services.scoring import PlayerScore
 from lolbet.services.taunt_lines import TAUNTS, total_lines
 from lolbet.services.taunts import _category, taunt_for
@@ -45,16 +47,32 @@ def score(
     )
 
 
+def snapshot(tier="GOLD", division="IV", lp=50) -> RankSnapshot:
+    from lolbet.riot.rank import RankInfo
+
+    info = RankInfo("RANKED_SOLO_5x5", tier, division, lp)
+    return RankSnapshot(
+        puuid="p1", platform="euw1", tier=tier, division=division,
+        league_points=lp, ladder_score=info.score,
+    )
+
+
+def change(before, after) -> RankChange:
+    return RankChange(puuid="p1", previous=before, current=after)
+
+
 def pick(minutes: int = 30, **kwargs) -> str:
     form = kwargs.pop("form", VETERAN)
     is_mvp = kwargs.pop("is_mvp", False)
     is_worst = kwargs.pop("is_worst", False)
+    rank_change = kwargs.pop("rank_change", None)
     return _category(
         score(**kwargs),
         is_mvp=is_mvp,
         is_worst=is_worst,
         form=form,
         duration_seconds=minutes * 60,
+        rank_change=rank_change,
     )
 
 
@@ -66,7 +84,7 @@ def test_there_are_hundreds_of_lines():
 
 
 def test_no_category_is_left_empty():
-    assert len(TAUNTS) == 23
+    assert len(TAUNTS) == 27
     assert all(len(lines) >= 10 for lines in TAUNTS.values())
 
 
@@ -82,6 +100,7 @@ def test_every_line_uses_only_known_fields():
         "cs_per_min",
         "vision",
         "damage",
+        "lp",
     }
     sample = dict.fromkeys(known, 1)
     for name, lines in TAUNTS.items():
@@ -225,3 +244,59 @@ def test_every_category_renders_without_leftovers():
             )
             assert "{" not in line and "}" not in line
             assert line.strip()
+
+
+# -- les LP ----------------------------------------------------------------
+
+
+def test_losing_a_division_is_the_headline():
+    """Retrograder prime sur tout le reste, meme un record de morts."""
+    dropped = change(snapshot("GOLD", "IV", 8), snapshot("SILVER", "I", 75))
+    assert pick(deaths=14, win=False, rank_change=dropped) == "demoted"
+
+
+def test_gaining_a_division_is_the_headline():
+    climbed = change(snapshot("SILVER", "I", 92), snapshot("GOLD", "IV", 12))
+    assert pick(win=True, rank_change=climbed) == "promoted"
+
+
+def test_a_big_lp_swing_without_a_division_change():
+    crashed = change(snapshot("GOLD", "IV", 60), snapshot("GOLD", "IV", 28))
+    assert pick(win=False, rank_change=crashed) == "lp_crash"
+
+    surged = change(snapshot("GOLD", "IV", 20), snapshot("GOLD", "IV", 55))
+    assert pick(win=True, rank_change=surged) == "lp_surge"
+
+
+def test_a_small_lp_swing_is_not_worth_mentioning():
+    tiny = change(snapshot("GOLD", "IV", 50), snapshot("GOLD", "IV", 62))
+    assert pick(win=True, rank_change=tiny) not in {"lp_surge", "lp_crash", "promoted"}
+
+
+def test_a_first_snapshot_has_nothing_to_compare():
+    """Sans releve precedent, on ne peut rien dire des LP."""
+    first = change(None, snapshot("GOLD", "IV", 50))
+    assert first.known is False
+    assert pick(win=True, rank_change=first) not in {"promoted", "demoted", "lp_surge"}
+
+
+def test_the_lp_amount_is_injected_without_a_sign():
+    crashed = change(snapshot("GOLD", "IV", 60), snapshot("GOLD", "IV", 28))
+    line = taunt_for(
+        score(win=False), is_mvp=False, is_worst=False,
+        duration_seconds=1800, form=VETERAN, rank_change=crashed, seed="s",
+    )
+    assert "32" in line
+    assert "-32" not in line  # la phrase porte deja le sens de la perte
+
+
+def test_rank_change_reports_its_direction():
+    assert change(snapshot("GOLD", "IV", 8), snapshot("SILVER", "I", 75)).direction == -1
+    assert change(snapshot("SILVER", "I", 92), snapshot("GOLD", "IV", 12)).direction == 1
+    assert change(snapshot("GOLD", "IV", 20), snapshot("GOLD", "IV", 55)).direction == 0
+
+
+def test_signed_delta_reads_correctly():
+    assert change(snapshot("GOLD", "IV", 20), snapshot("GOLD", "IV", 55)).signed_delta == "+35 LP"
+    assert change(snapshot("GOLD", "IV", 55), snapshot("GOLD", "IV", 20)).signed_delta == "-35 LP"
+    assert change(None, snapshot()).signed_delta == "LP inconnus"

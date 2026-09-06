@@ -697,6 +697,10 @@ class GameTracker:
                 game.id,
             )
 
+        # Les rangs sont relus AVANT de composer le récap : c'est ce qui
+        # permet d'y afficher les LP gagnés ou perdus.
+        rank_changes = await self._capture_ranks(game_id, participants)
+
         tracked_puuids = {p.puuid for p in participants}
         # Les vannes ne visent que des joueurs inscrits volontairement,
         # et uniquement sur leurs statistiques de la partie.
@@ -705,6 +709,7 @@ class GameTracker:
             {p.puuid: p.discord_id for p in participants},
             seed=snapshot[0],
             forms=forms,
+            rank_changes=rank_changes,
         )
         embed = build_result_embed(
             riot_game_id=snapshot[0],
@@ -714,10 +719,10 @@ class GameTracker:
             tracked_team_id=snapshot[2],
             settlement=settlement,
             ddragon=bot.ddragon,
+            rank_changes=rank_changes,
         )
         await self._post_followup(game_id, embed, content=taunts)
         await bot.updater.refresh(game_id)
-        await self._capture_ranks(game_id, participants)
         log.info(
             "tracker.resolved",
             game=snapshot[0],
@@ -801,16 +806,21 @@ class GameTracker:
         except discord.Forbidden as exc:
             log.warning("tracker.followup_failed", game=game.riot_game_id, error=str(exc))
 
-    async def _capture_ranks(self, game_id: int, participants: list) -> None:
-        """Relève le rang des joueurs suivis juste après la partie."""
+    async def _capture_ranks(self, game_id: int, participants: list) -> dict:
+        """Relève le rang des joueurs suivis juste après la partie.
+
+        Renvoie les écarts par puuid. Un échec de relevé ne bloque jamais le
+        récapitulatif : on l'affiche simplement sans les LP.
+        """
         bot = self._bot
+        changes: dict = {}
         async with bot.session_factory() as session:
             game = await session.get(TrackedGame, game_id)
             if game is None:
-                return
+                return changes
             for participant in participants:
                 try:
-                    await capture_after_game(
+                    change = await capture_after_game(
                         session,
                         bot.riot,
                         puuid=participant.puuid,
@@ -819,7 +829,11 @@ class GameTracker:
                     )
                 except Exception as exc:  # jamais bloquant
                     log.warning("tracker.rank_capture_failed", error=str(exc))
+                    continue
+                if change is not None:
+                    changes[participant.puuid] = change
             await session.commit()
+        return changes
 
     async def _alert_bad_key(self) -> None:
         """Prévient dans Discord que la clé Riot est refusée."""

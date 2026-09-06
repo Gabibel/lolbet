@@ -38,8 +38,9 @@ real-money path anywhere in the code and nothing to add one to.
    players actually did *and on their history*, and the game LVP gets sent
    to jail.
 7. **Remember** — each tracked player's line is frozen into
-   `player_game_stat`, and their rank is re-read to record an LP snapshot,
-   which feeds `/historique`, `/progression` and the seasonal standings.
+   `player_game_stat`, and their rank is re-read *before the recap is built*
+   so the LP gained or lost appears in it. Snapshots feed `/historique`,
+   `/progression` and the seasonal standings.
 
 ### Commands
 
@@ -467,10 +468,14 @@ when nothing notable happened. Priority runs: newcomer, personal record,
 repeat LVP or first MVP, game title, deathless game, streak, game length, then
 plain performance.
 
-23 categories: the ten game-outcome ones (MVP/LVP, fed, good, bad, each with a
+27 categories: the ten game-outcome ones (MVP/LVP, fed, good, bad, each with a
 win and a loss variant), seven that need history (first game, death record,
-kill record, both streaks, first MVP, repeat LVP), and six about the game
-itself (deathless, stomp, marathon, each way).
+kill record, both streaks, first MVP, repeat LVP), six about the game itself
+(deathless, stomp, marathon, each way), and four about the ladder (promotion,
+demotion, and a big LP swing either way).
+
+Losing a division outranks everything else, including a personal record: it is
+the rarer event, and the one that stings.
 
 Guardrails, kept under test: only players who opted in are targeted, and only
 on their stats from that game. A support is never mocked for farming, an MVP is

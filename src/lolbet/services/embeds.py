@@ -348,14 +348,25 @@ def _description(card: GameCard, ddragon: DDragon) -> str:
 # -- results ---------------------------------------------------------------
 
 
-def _stat_line(score: PlayerScore, ddragon: DDragon) -> str:
+def _stat_line(score: PlayerScore, ddragon: DDragon, change=None) -> str:
     champion = score.champion_name or ddragon.champion_name(score.champion_id)
+    lp_line = ""
+    if change is not None:
+        arrow = (
+            "\N{CHART WITH UPWARDS TREND}"
+            if change.delta > 0
+            else "\N{CHART WITH DOWNWARDS TREND}"
+            if change.delta < 0
+            else "\N{LEFT RIGHT ARROW}"
+        )
+        moved = f"{change.signed_delta} \N{RIGHTWARDS ARROW} " if change.known else ""
+        lp_line = f"\n {arrow} {moved}{change.label}"
     return (
         f"`{champion:<12}` **{score.kda_line}** "
         f"({score.kda_ratio:.1f} KDA)\n"
         f" {score.cs} CS ({score.cs_per_min:.1f}/min) • "
         f"{format_points(score.damage)} dégâts • {format_points(score.gold)} or • "
-        f"{score.vision_score} vision"
+        f"{score.vision_score} vision" + lp_line
     )
 
 
@@ -387,6 +398,7 @@ def build_result_embed(
     tracked_team_id: int,
     settlement: Settlement | None,
     ddragon: DDragon,
+    rank_changes: dict | None = None,
 ) -> discord.Embed:
     won = scores.winning_team_id == tracked_team_id
     tracked_scores = [s for s in scores.players if s.puuid in tracked_puuids]
@@ -415,7 +427,10 @@ def build_result_embed(
     if tracked_scores:
         embed.add_field(
             name="Joueurs suivis",
-            value="\n".join(_stat_line(s, ddragon) for s in tracked_scores)[:1024],
+            value="\n".join(
+                _stat_line(s, ddragon, (rank_changes or {}).get(s.puuid))
+                for s in tracked_scores
+            )[:1024],
             inline=False,
         )
 

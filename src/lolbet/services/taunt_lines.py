@@ -9,7 +9,7 @@ Règles à respecter en éditant :
 * garder au moins une phrase par catégorie, sinon le tirage échoue ;
 * les champs entre accolades sont remplacés à l'exécution. Disponibles
   partout : ``{deaths}``, ``{kills}``, ``{assists}``, ``{streak}``,
-  ``{minutes}``, ``{cs}``, ``{vision}``. Une accolade seule casse le
+  ``{minutes}``, ``{cs}``, ``{vision}``, ``{lp}``. Une accolade seule casse le
   formatage : écrire ``{{`` pour une accolade littérale ;
 * on chambre la performance, jamais la personne. Seuls des joueurs inscrits
   volontairement sont visés.
@@ -418,6 +418,74 @@ REPEAT_LVP = (
     "Encore LVP. Un jour on en fera une catégorie à ton nom.",
 )
 
+# Division ou palier perdu. Le plus dur des résultats.
+DEMOTED = (
+    "Rétrogradé. {lp} LP, et une division en moins.",
+    "Tu descends d'une division. On avait prévenu.",
+    "Division perdue. Il va falloir tout refaire.",
+    "{lp} LP : assez pour changer de division, dans le mauvais sens.",
+    "Rétrogradation actée. Le classement ne fait pas de sentiment.",
+    "Une division en moins. La remontée commence maintenant.",
+    "Tu quittes ta division par le bas. Ça arrive aux meilleurs, paraît-il.",
+    "{lp} LP et un palier en moins. Soirée réussie.",
+    "Descente confirmée. On note la date, pour la remontée.",
+    "Division perdue : le genre de partie dont on se souvient.",
+    "Tu redescends. Le chemin inverse est plus long, tu verras.",
+    "Rétrogradé. Il reste la fierté. Enfin, il restait.",
+    "{lp} LP en moins, et le palier avec.",
+    "La division t'a lâché. Elle reviendra, peut-être.",
+    "Descendu d'un cran. Ce n'était pas le bon soir pour tenter.",
+    "Rétrogradation. Seul point positif : la cote sera meilleure en face.",
+)
+
+# Division ou palier gagné.
+PROMOTED = (
+    "Promu ! {lp} LP et une division en plus.",
+    "Tu montes d'une division. Bien joué, sincèrement.",
+    "Division gagnée. Profite, le palier suivant mord.",
+    "{lp} LP : assez pour passer le palier. Excellent.",
+    "Promotion actée. On t'attend au prochain cran.",
+    "Une division en plus. La progression paie.",
+    "Tu changes de division, par le haut cette fois.",
+    "{lp} LP et un palier gagné. Grosse soirée.",
+    "Montée confirmée. Reste à la garder.",
+    "Promu. C'est le moment de s'arrêter, statistiquement.",
+    "Division supérieure débloquée. Ne gâche pas tout ce soir.",
+    "Tu montes. Rare, donc noté.",
+    "{lp} LP : le palier est passé.",
+    "Promotion. On applaudit, puis on attend la rechute.",
+)
+
+# Grosse perte de LP, sans rétrogradation.
+LP_CRASH = (
+    "{lp} LP d'un coup. Le classement s'en souviendra.",
+    "{lp} LP. À ce rythme, la division ne tiendra pas longtemps.",
+    "Tu laisses {lp} LP sur la table. Aïe.",
+    "{lp} LP envolés. Il en faut peu pour tout gâcher.",
+    "{lp} LP : la partie coûte cher.",
+    "Perte sèche de {lp} LP. On respire, on recommence.",
+    "{lp} LP. La prochaine sera meilleure, forcément.",
+    "{lp} LP en moins. Le compteur descend vite.",
+    "{lp} LP. Une soirée de plus à rattraper.",
+    "{lp} LP perdus. La division commence à regarder ailleurs.",
+    "{lp} LP : le genre de partie qu'on aimerait ne pas avoir jouée.",
+)
+
+# Gros gain de LP, sans promotion.
+LP_SURGE = (
+    "{lp} LP en une partie. Continue.",
+    "{lp} LP : le classement remonte enfin.",
+    "{lp} LP d'un coup. Voilà à quoi ça ressemble.",
+    "{lp} LP. La division suivante approche.",
+    "{lp} LP gagnés. Bien joué.",
+    "{lp} LP : la meilleure façon de finir une soirée.",
+    "{lp} LP en une partie. Refais-en trente comme ça.",
+    "{lp} LP. Le classement commence à te respecter.",
+    "{lp} LP d'un coup : la division suivante n'est plus loin.",
+    "{lp} LP. Arrête-toi là, ce serait sage.",
+)
+
+
 # =========================================================================
 # LE CONTEXTE DE LA PARTIE
 # =========================================================================
@@ -611,6 +679,10 @@ TAUNTS: dict[str, tuple[str, ...]] = {
     "stomp_lost": STOMP_LOST,
     "long_game_won": LONG_GAME_WON,
     "long_game_lost": LONG_GAME_LOST,
+    "demoted": DEMOTED,
+    "promoted": PROMOTED,
+    "lp_crash": LP_CRASH,
+    "lp_surge": LP_SURGE,
 }
 
 

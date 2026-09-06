@@ -49,6 +49,45 @@ class Progression:
         return sum(1 for s in self.snapshots if s.game_id is not None)
 
 
+@dataclass(frozen=True, slots=True)
+class RankChange:
+    """Ce qu'une partie a coûté ou rapporté en LP."""
+
+    puuid: str
+    previous: RankSnapshot | None
+    current: RankSnapshot
+
+    @property
+    def known(self) -> bool:
+        """Faux au tout premier relevé : il n'y a rien à comparer."""
+        return self.previous is not None
+
+    @property
+    def delta(self) -> int:
+        if self.previous is None:
+            return 0
+        return self.current.ladder_score - self.previous.ladder_score
+
+    @property
+    def direction(self) -> int:
+        """+1 promu, -1 rétrogradé, 0 même division."""
+        if self.previous is None:
+            return 0
+        before = (self.previous.tier, self.previous.division)
+        after = (self.current.tier, self.current.division)
+        if before == after:
+            return 0
+        return 1 if self.current.ladder_score > self.previous.ladder_score else -1
+
+    @property
+    def label(self) -> str:
+        return snapshot_label(self.current)
+
+    @property
+    def signed_delta(self) -> str:
+        return f"{self.delta:+d} LP" if self.known else "LP inconnus"
+
+
 def _to_info(snapshot: RankSnapshot) -> RankInfo:
     return RankInfo(
         queue=snapshot.queue,
@@ -119,8 +158,12 @@ async def capture_after_game(
     puuid: str,
     platform: str,
     game_id: int | None = None,
-) -> RankSnapshot | None:
-    """Relit le rang sans passer par le cache, puis enregistre le relevé."""
+) -> RankChange | None:
+    """Relit le rang hors cache et renvoie ce que la partie a changé.
+
+    Le relevé précédent est lu **avant** l'écriture du nouveau, sinon l'écart
+    serait toujours nul.
+    """
     try:
         entries = await riot.refresh_league_entries(puuid, platform)
     except RiotAPIError as exc:
@@ -130,8 +173,20 @@ async def capture_after_game(
     rank = solo_queue_rank(entries)
     if rank is None:
         return None
-    return await record_snapshot(
+
+    previous = await latest_snapshot(session, puuid, rank.queue)
+    stored = await record_snapshot(
         session, puuid=puuid, platform=platform, rank=rank, game_id=game_id
+    )
+    # stored vaut None quand le rang n'a pas bougé : le relevé courant est
+    # alors le précédent, et l'écart est nul.
+    current = stored or previous
+    if current is None:
+        return None
+    return RankChange(
+        puuid=puuid,
+        previous=previous if stored is not None else previous,
+        current=current,
     )
 
 

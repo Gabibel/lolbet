@@ -17,6 +17,7 @@ from __future__ import annotations
 import random
 
 from .history import PlayerForm
+from .progression import RankChange
 from .scoring import PlayerScore
 from .taunt_lines import JABS, LVP_LINES, MVP_LINES, TAUNTS, total_lines
 
@@ -37,6 +38,8 @@ KDA_BAD = 1.0
 KDA_GREAT = 4.0
 STREAK_THRESHOLD = 3
 REPEAT_LVP_THRESHOLD = 2
+# Un ecart de LP au-dela duquel la partie merite d'etre commentee.
+LP_BIG_SWING = 25
 
 # Une partie courte est écrasée, une longue est un marathon.
 STOMP_MAX_MINUTES = 20
@@ -58,10 +61,19 @@ def _category(
     is_worst: bool,
     form: PlayerForm | None = None,
     duration_seconds: int = 0,
+    rank_change: RankChange | None = None,
 ) -> str:
     """La situation la plus spécifique qui décrit cette partie."""
     won = score.win
     minutes = duration_seconds / 60
+
+    # Changer de division est plus rare que tout le reste : c'est ce
+    # dont on parle, meme si le joueur a aussi battu un record.
+    if rank_change is not None and rank_change.known:
+        if rank_change.direction < 0:
+            return "demoted"
+        if rank_change.direction > 0:
+            return "promoted"
 
     # -- ce que seul l'historique peut dire -------------------------------
     if form is not None:
@@ -88,6 +100,11 @@ def _category(
     if score.deaths == 0 and minutes >= DEATHLESS_MIN_MINUTES:
         return "deathless_won" if won else "deathless_lost"
 
+    # Une grosse variation de LP, sans changement de division.
+    if rank_change is not None and rank_change.known:
+        if abs(rank_change.delta) >= LP_BIG_SWING:
+            return "lp_surge" if rank_change.delta > 0 else "lp_crash"
+
     if form is not None:
         streak = (form.winning_streak if won else form.losing_streak) + 1
         # Une série qui vient de se briser n'en est plus une.
@@ -112,7 +129,10 @@ def _category(
 
 
 def _fields(
-    score: PlayerScore, duration_seconds: int, form: PlayerForm | None
+    score: PlayerScore,
+    duration_seconds: int,
+    form: PlayerForm | None,
+    rank_change: RankChange | None = None,
 ) -> dict[str, object]:
     """Tout ce qu'une phrase peut vouloir insérer."""
     streak = 0
@@ -128,6 +148,9 @@ def _fields(
         "cs_per_min": f"{score.cs_per_min:.1f}",
         "vision": score.vision_score,
         "damage": f"{score.damage:,}".replace(",", " "),
+        # Valeur absolue : la phrase porte deja le sens du gain ou
+        # de la perte, un signe en plus donnerait « -19 LP perdus ».
+        "lp": abs(rank_change.delta) if rank_change else 0,
     }
 
 
@@ -163,6 +186,7 @@ def taunt_for(
     duration_seconds: int,
     seed: str = "",
     form: PlayerForm | None = None,
+    rank_change: RankChange | None = None,
 ) -> str:
     """Une phrase pour ce joueur, plus éventuellement une pique statistique.
 
@@ -176,8 +200,9 @@ def taunt_for(
         is_worst=is_worst,
         form=form,
         duration_seconds=duration_seconds,
+        rank_change=rank_change,
     )
-    fields = _fields(score, duration_seconds, form)
+    fields = _fields(score, duration_seconds, form, rank_change)
     line = rng.choice(TAUNTS[category]).format(**fields)
 
     # On n'enfonce que ceux qui le méritent : jamais un MVP, jamais une
@@ -197,6 +222,7 @@ def build_taunt_content(
     seed: str = "",
     max_lines: int = 5,
     forms: dict[str, PlayerForm] | None = None,
+    rank_changes: dict[str, RankChange] | None = None,
 ) -> str:
     """Le texte posté au-dessus du récapitulatif.
 
@@ -220,6 +246,7 @@ def build_taunt_content(
             duration_seconds=scores.duration_seconds,
             seed=seed,
             form=(forms or {}).get(puuid),
+            rank_change=(rank_changes or {}).get(puuid),
         )
         lines.append(f"<@{discord_id}> {phrase}")
 
