@@ -1,4 +1,8 @@
-"""/inscription, /desinscription, /profil, /classement, et les variantes admin."""
+"""/inscription, /profil, /classement, /inscrits, et les commandes d'admin.
+
+Se désinscrire soi-même n'est volontairement pas possible : seul un
+gestionnaire du serveur peut retirer un joueur, avec /desinscrire-joueur.
+"""
 
 from __future__ import annotations
 
@@ -112,27 +116,6 @@ class Registration(commands.Cog):
             f"{verb} : **{result.riot_id}** sur `{result.platform}`.\n"
             f"Tes parties seront annoncées ici. Solde : "
             f"**{format_coins(result.balance)}** pièces.",
-            ephemeral=True,
-        )
-
-    @app_commands.command(
-        name="desinscription", description="Arrête le suivi de ton compte sur ce serveur."
-    )
-    @app_commands.guild_only()
-    async def unregister(self, interaction: discord.Interaction) -> None:
-        async with self.bot.session_factory() as session:
-            riot_id = await unlink_account(
-                session, interaction.guild_id or 0, interaction.user.id
-            )
-            await session.commit()
-
-        if riot_id is None:
-            await interaction.response.send_message(
-                "Tu n'es pas inscrit ici.", ephemeral=True
-            )
-            return
-        await interaction.response.send_message(
-            f"**{riot_id}** n'est plus suivi. Tes pièces et ton historique restent en place.",
             ephemeral=True,
         )
 

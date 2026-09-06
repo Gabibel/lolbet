@@ -42,7 +42,6 @@ real-money path anywhere in the code and nothing to add one to.
 | Command | Who | What |
 | --- | --- | --- |
 | `/inscription <RiotID#TAG> [region]` | anyone | Link your account |
-| `/desinscription` | anyone | Stop tracking you (coins are kept) |
 | `/profil [user]` | anyone | Riot ID, rank, balance, betting record |
 | `/classement` | anyone | Richest bettors in this server |
 | `/solde [user]` | anyone | Coin balance |
@@ -51,7 +50,7 @@ real-money path anywhere in the code and nothing to add one to.
 | `/annulerpari [game]` | anyone | Cancel a bet before the lock |
 | `/inscrits` | anyone | List everyone tracked on this server |
 | `/inscrire-joueur <member> <RiotID#TAG>` | Manage Server | Link someone else's account |
-| `/desinscrire-joueur <member>` | Manage Server | Stop tracking someone else |
+| `/desinscrire-joueur <member>` | Manage Server | Stop tracking someone else - the only way out, on purpose |
 | `/salon [channel]` | Manage Server | Where games are announced |
 | `/statut` | Manage Server | Rate-limit, cache and tracker diagnostics |
 
@@ -86,6 +85,10 @@ Then, in your server: `/salon #lol-games`, and `/inscription YourName#TAG`.
 One Discord account tracks one LoL account: registering again replaces the
 previous link. Everyone registers themselves, or a server manager does it for
 them with `/inscrire-joueur @member RiotID#TAG`.
+
+There is deliberately no self-unregister command: leaving the tracking is a
+server manager decision, through `/desinscrire-joueur`. Drop that command back
+in if your server would rather let people opt out on their own.
 
 Slash commands sync globally, which Discord can take up to an hour to
 propagate. Set `LOLBET_DEV_GUILD_ID` to your server id for instant sync while
