@@ -359,8 +359,14 @@ def _stat_line(score: PlayerScore, ddragon: DDragon, change=None) -> str:
             if change.delta < 0
             else "\N{LEFT RIGHT ARROW}"
         )
-        moved = f"{change.signed_delta} \N{RIGHTWARDS ARROW} " if change.known else ""
-        lp_line = f"\n {arrow} {moved}{change.label}"
+        if change.known:
+            lp_line = (
+                f"\n {arrow} {change.signed_delta} "
+                f"\N{RIGHTWARDS ARROW} {change.label}"
+            )
+        else:
+            # Premier releve, ou LP pas encore mis a jour chez Riot.
+            lp_line = f"\n \N{BAR CHART} {change.label}"
     return (
         f"`{champion:<12}` **{score.kda_line}** "
         f"({score.kda_ratio:.1f} KDA)\n"

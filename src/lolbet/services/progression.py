@@ -56,11 +56,15 @@ class RankChange:
     puuid: str
     previous: RankSnapshot | None
     current: RankSnapshot
+    # Faux quand le rang lu est identique au precedent. Juste apres une
+    # partie classee, cela veut dire que Riot n'avait pas encore
+    # applique le gain : annoncer « +0 LP » serait un chiffre invente.
+    moved: bool = True
 
     @property
     def known(self) -> bool:
-        """Faux au tout premier relevé : il n'y a rien à comparer."""
-        return self.previous is not None
+        """Vrai seulement si l'ecart a vraiment ete mesure."""
+        return self.previous is not None and self.moved
 
     @property
     def delta(self) -> int:
@@ -81,7 +85,7 @@ class RankChange:
 
     @property
     def label(self) -> str:
-        return snapshot_label(self.current)
+        return compact_label(self.current)
 
     @property
     def signed_delta(self) -> str:
@@ -101,6 +105,11 @@ def _to_info(snapshot: RankSnapshot) -> RankInfo:
 
 def snapshot_label(snapshot: RankSnapshot) -> str:
     return _to_info(snapshot).display
+
+
+def compact_label(snapshot: RankSnapshot) -> str:
+    """Sans le bilan de victoires : le recap est deja dense."""
+    return _to_info(snapshot).compact
 
 
 async def latest_snapshot(
@@ -185,8 +194,9 @@ async def capture_after_game(
         return None
     return RankChange(
         puuid=puuid,
-        previous=previous if stored is not None else previous,
+        previous=previous,
         current=current,
+        moved=stored is not None,
     )
 
 

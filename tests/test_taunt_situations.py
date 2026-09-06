@@ -300,3 +300,30 @@ def test_signed_delta_reads_correctly():
     assert change(snapshot("GOLD", "IV", 20), snapshot("GOLD", "IV", 55)).signed_delta == "+35 LP"
     assert change(snapshot("GOLD", "IV", 55), snapshot("GOLD", "IV", 20)).signed_delta == "-35 LP"
     assert change(None, snapshot()).signed_delta == "LP inconnus"
+
+
+def test_an_unchanged_rank_is_not_a_measured_delta():
+    """Riot n'a pas encore applique les LP : ne rien inventer."""
+    same = snapshot("GOLD", "IV", 75)
+    stalled = RankChange(puuid="p1", previous=same, current=same, moved=False)
+    assert stalled.known is False
+    assert stalled.signed_delta == "LP inconnus"
+    assert pick(win=True, rank_change=stalled) not in {"promoted", "lp_surge"}
+
+
+def test_a_measured_delta_is_reported():
+    moved = RankChange(
+        puuid="p1",
+        previous=snapshot("GOLD", "IV", 40),
+        current=snapshot("GOLD", "IV", 75),
+        moved=True,
+    )
+    assert moved.known is True
+    assert moved.signed_delta == "+35 LP"
+
+
+def test_the_recap_label_drops_the_win_loss_record():
+    """La ligne du recap est deja dense : pas de bilan en plus."""
+    change_ = RankChange(puuid="p1", previous=None, current=snapshot("GOLD", "IV", 75))
+    assert "75 LP" in change_.label
+    assert "%" not in change_.label

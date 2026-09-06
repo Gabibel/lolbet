@@ -114,6 +114,15 @@ class RankInfo:
         return f"{prefix}{4 - division} {self.league_points}LP"
 
     @property
+    def compact(self) -> str:
+        """Palier, division et LP, sans le bilan : pour les lignes denses."""
+        tier = self.tier.upper()
+        emoji = TIER_EMOJI.get(tier, "")
+        name = TIER_LABELS_FR.get(tier, tier.title())
+        core = name if tier in APEX_TIERS else f"{name} {self.division.upper()}"
+        return f"{emoji} {core} {self.league_points} LP".strip()
+
+    @property
     def display(self) -> str:
         tier = self.tier.upper()
         emoji = TIER_EMOJI.get(tier, "")
