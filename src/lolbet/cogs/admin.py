@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 
 from ..logging_conf import get_logger
 from ..models import GameStatus, GuildConfig, Player, TrackedGame
-from ..utils import utcnow
+from ..utils import discord_timestamp, utcnow
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..bot import LoLBet
@@ -128,6 +128,21 @@ class Admin(commands.Cog):
         embed.add_field(
             name="Limite de requêtes Riot",
             value="\n".join(f"{key} : {value}" for key, value in snapshot.items()),
+            inline=False,
+        )
+        tracker = self.bot.tracker
+        last_poll = (
+            discord_timestamp(tracker.last_poll_at)
+            if tracker.last_poll_at
+            else "jamais"
+        )
+        embed.add_field(
+            name="Sondage",
+            value=(
+                f"Dernier appel : {last_poll}\n"
+                f"{tracker.last_pass_targets} joueur(s) surveillé(s) par passe\n"
+                f"{tracker.polls_done} appels, {tracker.games_seen} parties vues"
+            ),
             inline=False,
         )
         embed.add_field(name="Entrées en cache", value=str(self.bot.cache.size))

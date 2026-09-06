@@ -85,6 +85,11 @@ class GameTracker:
         self._last_cache_purge = utcnow()
         self._last_backup = utcnow() - timedelta(days=1)
         self._last_key_alert: datetime | None = None
+        # De quoi répondre à « est-ce que le bot surveille vraiment ? »
+        self.last_poll_at: datetime | None = None
+        self.last_pass_targets = 0
+        self.polls_done = 0
+        self.games_seen = 0
 
     # -- lifecycle --------------------------------------------------------
 
@@ -126,7 +131,16 @@ class GameTracker:
                 continue
 
             interval = self._bot.settings.poll_interval_seconds
+            self.last_pass_targets = len(targets)
+            watchers = sum(1 for t in targets if t.is_watcher)
+            log.info(
+                "tracker.poll_pass",
+                targets=len(targets),
+                watching=watchers,
+                interval=interval,
+            )
             if not targets:
+                log.warning("tracker.nobody_to_poll")
                 await self._sleep(interval)
                 continue
 
@@ -138,6 +152,8 @@ class GameTracker:
                     break
                 try:
                     await self._poll_target(target)
+                    self.polls_done += 1
+                    self.last_poll_at = utcnow()
                 except RiotUnauthorized as exc:
                     log.error("tracker.bad_api_key", error=str(exc))
                     await self._alert_bad_key()
@@ -215,6 +231,13 @@ class GameTracker:
             await self._reconcile_watched(target.game_ids, current_id)
 
         if spectator and current_id:
+            self.games_seen += 1
+            log.info(
+                "tracker.in_game",
+                puuid=target.puuid[:8],
+                game=current_id,
+                queue=spectator.get("gameQueueConfigId"),
+            )
             await self._on_live_game(spectator, target.platform, current_id)
 
     async def _reconcile_watched(self, game_ids: tuple[int, ...], current_id: str | None) -> None:
@@ -299,7 +322,11 @@ class GameTracker:
             channel_id = config.announce_channel_id if config else None
 
         if not channel_id:
-            log.debug("tracker.no_channel", guild=guild_id)
+            log.warning(
+                "tracker.no_channel",
+                guild=guild_id,
+                hint="lance /salon pour choisir ou annoncer",
+            )
             return
 
         channel = bot.get_channel(channel_id)
