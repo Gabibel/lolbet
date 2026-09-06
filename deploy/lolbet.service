@@ -1,0 +1,46 @@
+[Unit]
+Description=LoLBet - League of Legends tracker and virtual betting bot
+Documentation=https://github.com/your-name/lolbet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lolbet
+Group=lolbet
+WorkingDirectory=/opt/lolbet
+EnvironmentFile=/opt/lolbet/.env
+ExecStart=/opt/lolbet/.venv/bin/python -m lolbet
+
+# The bot reconnects on its own; restart only covers a hard crash.
+Restart=on-failure
+RestartSec=10
+# Give up if it crash-loops, so a bad API key does not spin forever.
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+# Logs go to the journal: journalctl -u lolbet -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lolbet
+
+# Hardening. The bot only needs to write its own SQLite file.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/lolbet/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+# A Raspberry Pi Zero 2 W has 512MB; this keeps the bot from taking the box
+# down if something leaks. Raise it if you track hundreds of players.
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
