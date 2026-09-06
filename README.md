@@ -168,6 +168,36 @@ constraint. Use the Oracle Always Free VM or a Pi.
 [`deploy/Dockerfile`](deploy/Dockerfile) builds a slim ARM64-capable image. It
 is genuinely optional — on a Pi, systemd is less overhead.
 
+### Google Cloud e2-micro (always free, no capacity lottery)
+
+The most reliable free 24/7 option. Unlike Oracle it does not reject signups on
+a whim and its instances are always available. Browser SSH means no key files.
+
+Create the instance in **us-central1**, **us-west1** or **us-east1** - those three
+regions only, or it is not free. The US location is irrelevant here: the bot
+just calls the Riot and Discord APIs.
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| Machine type | `e2-micro` | The only always-free shape |
+| Boot disk | Ubuntu 24.04 LTS, **Standard persistent disk**, 30 GB | Balanced/SSD disks are billed |
+| Firewall | leave everything unchecked | The bot dials out; nothing dials in |
+
+Then click **SSH** on the instance row and run the same install as above
+(`apt install python3.12-venv git`, clone, venv, `.env`, systemd unit).
+
+Two things to get right, or it stops being free:
+
+- **After the 90-day trial you must upgrade to a full account.** Otherwise the
+  VM is deleted when the credits expire. Upgrading does not start charging you:
+  always-free resources stay at zero as long as you stay inside the limits.
+- **Set a budget alert at $1** (Billing → Budgets & alerts) so anything
+  unexpected reaches you by email immediately.
+
+Always-free limits worth knowing: one e2-micro, 30 GB standard disk, and 1 GB of
+egress from North America per month. This bot uses a tiny fraction of that - a
+gateway websocket plus a handful of small API calls per minute.
+
 ### If Oracle refuses your signup
 
 Oracle rejects account creation opaquely, most often for a VPN or proxy (their
@@ -176,10 +206,9 @@ bank exactly, a prepaid card, or a repeated attempt. Retry once with the VPN
 off, in a private window, with a regular card. If it still fails, do not fight
 it: the free-tier support does not answer.
 
-**Google Cloud e2-micro** is the equivalent always-free VM (`us-central1`,
-`us-west1` or `us-east1`; the US region is irrelevant here since the bot only
-calls the Riot and Discord APIs). It also wants a card, but has none of the
-ARM capacity shortages. Otherwise use the Windows task above, or a Pi.
+Use the Google Cloud section above instead. It also wants a card, but its
+signup is far less trigger-happy and it has none of the ARM capacity
+shortages. If a card is the blocker itself, a Raspberry Pi is the way out.
 
 ### Backups
 
