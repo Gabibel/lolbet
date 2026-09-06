@@ -397,30 +397,47 @@ class GameTracker:
         view = (
             BetView(game_id, card.labels) if stored_status == GameStatus.LIVE else None
         )
+
+        # La ligne existe deja en base : les boutons ont besoin de son id. Tout
+        # ce qui suit doit donc etre annule en cas d'echec, sinon la partie
+        # reste suivie sans avoir jamais ete annoncee - et le garde-fou
+        # « deja annoncee » empeche toute nouvelle tentative.
+        message: discord.Message | None = None
         try:
             message = await channel.send(embed=embed, view=view)
+
+            thread_id = (
+                await self._open_thread(message, card, riot_game_id)
+                if bot.settings.use_threads
+                else None
+            )
+
+            async with bot.session_factory() as session:
+                stored = await session.get(TrackedGame, game_id)
+                if stored is not None:
+                    stored.message_id = message.id
+                    stored.thread_id = thread_id
+                    session.add(stored)
+                    await session.commit()
         except discord.Forbidden:
             log.warning("tracker.cannot_post", guild=guild_id, channel=channel_id)
-            await self._drop_game(game_id)
+            await self._abandon_announcement(game_id, message)
             return
         except discord.HTTPException as exc:
             log.warning("tracker.post_failed", guild=guild_id, error=str(exc))
-            await self._drop_game(game_id)
+            await self._abandon_announcement(game_id, message)
             return
-
-        thread_id = (
-            await self._open_thread(message, card, riot_game_id)
-            if bot.settings.use_threads
-            else None
-        )
-
-        async with bot.session_factory() as session:
-            stored = await session.get(TrackedGame, game_id)
-            if stored is not None:
-                stored.message_id = message.id
-                stored.thread_id = thread_id
-                session.add(stored)
-                await session.commit()
+        except Exception as exc:
+            # Tout le reste : embed refuse, bug de rendu, coupure reseau. La
+            # partie sera redetectee au prochain sondage.
+            log.exception(
+                "tracker.announce_crashed",
+                game=riot_game_id,
+                guild=guild_id,
+                error=str(exc),
+            )
+            await self._abandon_announcement(game_id, message)
+            return
 
         log.info(
             "tracker.announced",
@@ -455,6 +472,18 @@ class GameTracker:
             raise
         except Exception as exc:
             log.warning("tracker.enrich_failed", game_id=game_id, error=str(exc))
+
+    async def _abandon_announcement(
+        self, game_id: int, message: discord.Message | None
+    ) -> None:
+        """Efface toute trace d'une annonce ratee, pour pouvoir reessayer."""
+        if message is not None:
+            # Un message poste sans ligne en base aurait des boutons morts.
+            try:
+                await message.delete()
+            except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+                log.warning("tracker.orphan_message", message_id=message.id)
+        await self._drop_game(game_id)
 
     async def _drop_game(self, game_id: int) -> None:
         async with self._bot.session_factory() as session:
