@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     daily_amount: int = Field(default=100, ge=0)
     daily_cooldown_hours: int = Field(default=24, ge=1)
     bet_lock_seconds: int = Field(default=300, ge=0)
+    # Cote plancher garantie par la banque. Sans elle, miser tous du
+    # meme cote ne rapporte rien : le parimutuel ne redistribue que
+    # ce que les perdants ont laisse.
+    house_min_multiplier: float = Field(default=1.2, ge=1.0)
     min_bet: int = Field(default=1, ge=1)
     max_bet: int = Field(default=100_000, ge=1)
     embed_edit_debounce_seconds: float = Field(default=2.5, ge=0)

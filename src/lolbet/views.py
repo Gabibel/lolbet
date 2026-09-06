@@ -281,7 +281,11 @@ def bet_panel_text(
     """Ce que le joueur voit après avoir cliqué sur Parier."""
     labels = labels or SideLabels()
     multiplier = pool.multiplier(side)
-    odds = f"cote actuelle **x{multiplier:.2f}**" if multiplier else "personne n'a encore parié de ce côté"
+    odds = (
+        f"cote actuelle **x{multiplier:.2f}**"
+        if multiplier
+        else "personne n'a encore parié de ce côté"
+    )
     lines = [
         f"\N{MONEY BAG} Ton solde : **{format_coins(balance)}** pièces",
         f"Tu paries sur **{labels.of(side)}** - {odds}.",

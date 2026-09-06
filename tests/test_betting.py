@@ -220,7 +220,8 @@ async def test_a_lone_winner_takes_everything(session_factory, betting):
     assert settlement.paid[0][0] == ALICE
 
 
-async def test_everyone_is_refunded_when_nobody_backed_the_winner(session_factory, betting):
+async def test_nobody_on_the_winning_side_loses_everything(session_factory, betting):
+    """Se tromper a plusieurs du meme cote doit couter, pas etre rembourse."""
     game = await make_game(session_factory)
     async with session_factory() as session:
         await betting.place_bet(session, game, ALICE, BetSide.WIN, 300)
@@ -232,10 +233,82 @@ async def test_everyone_is_refunded_when_nobody_backed_the_winner(session_factor
         settlement = await betting.settle(session, stored, tracked_team_won=False)
         await session.commit()
 
-    assert settlement.refunded is True
+    assert settlement.refunded is False
+    assert settlement.paid == []
+    assert len(settlement.lost) == 2
     async with session_factory() as session:
         alice = await betting.get_wallet(session, GUILD, ALICE)
-    assert alice.balance == 1000
+    assert alice.balance == 700  # 1000 - 300 mises, rien ne revient
+    assert alice.net_profit == -300
+
+
+async def test_a_lone_correct_bettor_still_gains(session_factory, betting):
+    """Sans la banque, le parimutuel rendrait exactement la mise : x1.00."""
+    game = await make_game(session_factory)
+    async with session_factory() as session:
+        await betting.place_bet(session, game, ALICE, BetSide.WIN, 100)
+        await session.commit()
+
+    async with session_factory() as session:
+        stored = await session.get(TrackedGame, game.id)
+        settlement = await betting.settle(session, stored, tracked_team_won=True)
+        await session.commit()
+
+    payout = settlement.paid[0][2]
+    assert payout == 120  # plancher x1.20 comble par la banque
+    async with session_factory() as session:
+        alice = await betting.get_wallet(session, GUILD, ALICE)
+    assert alice.balance == 1020
+    assert alice.net_profit == 20
+
+
+async def test_everyone_on_the_winning_side_still_gains(session_factory, betting):
+    game = await make_game(session_factory)
+    async with session_factory() as session:
+        await betting.place_bet(session, game, ALICE, BetSide.WIN, 100)
+        await betting.place_bet(session, game, BOB, BetSide.WIN, 400)
+        await session.commit()
+
+    async with session_factory() as session:
+        stored = await session.get(TrackedGame, game.id)
+        settlement = await betting.settle(session, stored, tracked_team_won=True)
+        await session.commit()
+
+    payouts = {user: payout for user, _, payout in settlement.paid}
+    assert payouts[ALICE] == 120
+    assert payouts[BOB] == 480
+
+
+async def test_the_floor_never_lowers_a_better_payout(session_factory, betting):
+    """Quand les perdants ont alimente la cagnotte, le parimutuel prime."""
+    game = await make_game(session_factory)
+    async with session_factory() as session:
+        await betting.place_bet(session, game, ALICE, BetSide.WIN, 100)
+        await betting.place_bet(session, game, BOB, BetSide.LOSS, 900)
+        await session.commit()
+
+    async with session_factory() as session:
+        stored = await session.get(TrackedGame, game.id)
+        settlement = await betting.settle(session, stored, tracked_team_won=True)
+        await session.commit()
+
+    # 1000 de cagnotte pour 100 mises du bon cote : x10, bien au-dessus de x1.2
+    assert settlement.paid[0][2] == 1000
+
+
+def test_the_displayed_odds_respect_the_floor():
+    """La cote annoncee doit etre celle qui sera payee."""
+    lonely = Pool(win_amount=500, loss_amount=0, win_count=1, min_multiplier=1.2)
+    assert lonely.multiplier(BetSide.WIN) == pytest.approx(1.2)
+
+    contested = Pool(win_amount=100, loss_amount=900, win_count=1, loss_count=1,
+                     min_multiplier=1.2)
+    assert contested.multiplier(BetSide.WIN) == pytest.approx(10.0)
+
+
+def test_a_side_with_no_bets_has_no_odds_yet():
+    empty = Pool(win_amount=100, loss_amount=0, win_count=1, min_multiplier=1.2)
+    assert empty.multiplier(BetSide.LOSS) is None
 
 
 async def test_void_refunds_every_bet(session_factory, betting):

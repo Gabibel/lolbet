@@ -450,8 +450,14 @@ def _payout_value(settlement: Settlement, labels: SideLabels | None = None) -> s
         return "Personne n'a parié sur celle-là."
     if settlement.refunded:
         return (
-            f"Aucun pari du bon côté : les {settlement.pool.total:,} pièces "
-            "ont été remboursées."
+            f"Partie annulée : les {settlement.pool.total:,} pièces ont été "
+            "remboursées."
+        )
+    if not settlement.paid:
+        # Depuis la banque, se tromper coûte même quand personne n'a vu juste.
+        return (
+            f"Personne n'avait misé du bon côté : les {settlement.pool.total:,} "
+            "pièces sont perdues."
         )
     lines = [
         f"Cagnotte **{settlement.pool.total:,}** pièces • côté gagnant : "

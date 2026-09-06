@@ -58,6 +58,9 @@ class Pool:
     loss_amount: int = 0
     win_count: int = 0
     loss_count: int = 0
+    # Plancher garanti par la banque, applique a l'affichage comme au
+    # paiement pour que la cote annoncee soit celle qui sera payee.
+    min_multiplier: float = 1.0
 
     @property
     def total(self) -> int:
@@ -68,11 +71,11 @@ class Pool:
         return self.win_count + self.loss_count
 
     def multiplier(self, side: str) -> float | None:
-        """What one coin on ``side`` pays if that side wins."""
+        """Ce que rapporte une piece misee sur ``side`` s'il gagne."""
         side_amount = self.win_amount if side == BetSide.WIN else self.loss_amount
         if side_amount <= 0 or self.total <= 0:
             return None
-        return self.total / side_amount
+        return max(self.total / side_amount, self.min_multiplier)
 
     def implied_probability(self, side: str) -> float | None:
         """Share of the pool on this side. This is what bettors believe,
@@ -186,6 +189,7 @@ class BettingService:
             loss_amount=loss_amount,
             win_count=win_count,
             loss_count=loss_count,
+            min_multiplier=self._settings.house_min_multiplier,
         )
 
     async def bets_for_game(self, session: AsyncSession, game_id: int) -> list[Bet]:
@@ -295,14 +299,18 @@ class BettingService:
         losers = [b for b in bets if b.side != winning_side and b.settled_at is None]
         now = utcnow()
 
-        if not winners:
-            # Nobody backed the winning side: refund everyone rather than
-            # burning the pool.
-            return await self._refund(session, bets, reason_void=False)
-
+        # Personne du bon cote : les mises sont perdues, pas rendues. Sans
+        # ca, se tromper a plusieurs du meme cote ne coute jamais rien.
         winning_total = sum(b.amount for b in winners)
         stakes = {int(b.id or 0): b.amount for b in winners}
         payouts = compute_payouts(stakes, winning_total, pool.total)
+        # La banque comble la difference quand le parimutuel seul rendrait
+        # moins que la cote plancher.
+        floor = self._settings.house_min_multiplier
+        for bet in winners:
+            minimum = int(bet.amount * floor)
+            bet_id = int(bet.id or 0)
+            payouts[bet_id] = max(payouts.get(bet_id, bet.amount), minimum)
 
         paid: list[tuple[int, int, int]] = []
         for bet in winners:
