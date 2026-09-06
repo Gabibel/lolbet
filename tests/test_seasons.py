@@ -319,3 +319,41 @@ def test_latest_backup_is_found(tmp_path):
     backup_now(source, day=date(2026, 1, 1))
     newest = backup_now(source, day=date(2026, 2, 1))
     assert latest_backup(source) == newest
+
+
+async def test_progression_never_mixes_two_queues(session_factory):
+    """Un rang flex et un rang solo ne se comparent pas."""
+    from lolbet.riot.rank import FLEX_QUEUE, SOLO_QUEUE
+
+    async with session_factory() as session:
+        flex = RankInfo(FLEX_QUEUE, "SILVER", "II", 40)
+        await record_snapshot(session, puuid="p9", platform="euw1", rank=flex)
+        solo = RankInfo(SOLO_QUEUE, "DIAMOND", "IV", 10)
+        await record_snapshot(session, puuid="p9", platform="euw1", rank=solo)
+        await session.commit()
+
+    async with session_factory() as session:
+        data = await progression(session, "p9", days=30)
+
+    # Le releve le plus recent est en solo : seuls les releves solo comptent.
+    assert all(s.queue == SOLO_QUEUE for s in data.snapshots)
+    assert data.delta == 0  # un seul releve solo, donc aucun ecart
+
+
+async def test_progression_can_be_asked_for_a_specific_queue(session_factory):
+    from lolbet.riot.rank import FLEX_QUEUE
+
+    async with session_factory() as session:
+        for lp in (10, 60):
+            await record_snapshot(
+                session,
+                puuid="p9",
+                platform="euw1",
+                rank=RankInfo(FLEX_QUEUE, "SILVER", "II", lp),
+            )
+        await session.commit()
+
+    async with session_factory() as session:
+        data = await progression(session, "p9", days=30, queue=FLEX_QUEUE)
+
+    assert data.delta == 50

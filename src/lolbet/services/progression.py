@@ -193,6 +193,12 @@ async def capture_after_game(
 async def progression(
     session: AsyncSession, puuid: str, *, days: int = 30, queue: str | None = None
 ) -> Progression:
+    if queue is None:
+        # Un joueur classe en flex puis en solo aurait des releves des deux
+        # files : les comparer donnerait un ecart qui ne veut rien dire.
+        newest = await latest_snapshot(session, puuid)
+        queue = newest.queue if newest is not None else None
+
     since = utcnow() - timedelta(days=days)
     statement = select(RankSnapshot).where(
         RankSnapshot.puuid == puuid, RankSnapshot.captured_at >= since
