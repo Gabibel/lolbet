@@ -238,6 +238,18 @@ class RiotClient:
         )
         return entries or []
 
+    async def refresh_league_entries(
+        self, puuid: str, platform: str
+    ) -> list[dict[str, Any]]:
+        """Ranked entries, ignoring the 6h cache.
+
+        Used right after a game: the cached value predates it, so it would
+        report the rank the player had before winning or losing.
+        """
+        platform = normalise_platform(platform, self._settings.default_platform)
+        await self._cache.invalidate(f"league:{platform}:{puuid}")
+        return await self.get_league_entries(puuid, platform)
+
     # -- SUMMONER-V4 (platform) -------------------------------------------
 
     async def get_summoner(

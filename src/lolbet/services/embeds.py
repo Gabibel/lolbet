@@ -455,6 +455,32 @@ def _payout_value(settlement: Settlement, labels: SideLabels | None = None) -> s
     return "\n".join(lines)[:1024]
 
 
+def build_bad_key_embed() -> discord.Embed:
+    """Posté dans le salon quand la clé Riot est refusée.
+
+    Sans ce message, la panne est totalement muette : plus aucune partie n'est
+    détectée et personne ne sait pourquoi.
+    """
+    embed = discord.Embed(
+        title="\N{WARNING SIGN} Suivi interrompu - clé Riot invalide",
+        colour=COLOUR_LOCKED,
+        description=(
+            "Riot refuse la clé API : plus aucune partie ne sera détectée "
+            "tant qu'elle n'est pas remplacée.\n\n"
+            "**Propriétaire du serveur** : régénère une clé sur "
+            "<https://developer.riotgames.com/>, mets-la dans `.env` sous "
+            "`LOLBET_RIOT_API_KEY`, puis redémarre le bot."
+        ),
+    )
+    embed.set_footer(
+        text=(
+            "Les clés de développement expirent toutes les 24 h. "
+            "Une clé personnelle, gratuite, n'expire jamais."
+        )
+    )
+    return embed
+
+
 def build_lock_embed(
     *,
     riot_game_id: str,

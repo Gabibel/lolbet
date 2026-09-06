@@ -35,7 +35,11 @@ real-money path anywhere in the code and nothing to add one to.
    [`scoring.py`](src/lolbet/services/scoring.py).
 6. **Roast** — the recap is introduced by a line picked from
    [`taunts.py`](src/lolbet/services/taunts.py) based on how the tracked
-   players actually did, and the game LVP gets sent to jail.
+   players actually did *and on their history*, and the game LVP gets sent
+   to jail.
+7. **Remember** — each tracked player's line is frozen into
+   `player_game_stat`, and their rank is re-read to record an LP snapshot,
+   which feeds `/historique`, `/progression` and the seasonal standings.
 
 ### Commands
 
@@ -49,6 +53,11 @@ real-money path anywhere in the code and nothing to add one to.
 | `/paris` | anyone | Your open positions |
 | `/annulerpari [game]` | anyone | Cancel a bet before the lock |
 | `/inscrits` | anyone | List everyone tracked on this server |
+| `/historique [player]` | anyone | Recent games, form and settled bets |
+| `/progression [player] [days]` | anyone | Rank movement over a window |
+| `/saison` | anyone | Current season and its standings |
+| `/palmares` | anyone | Frozen standings of past seasons |
+| `/cloturer-saison` | Manage Server | Archive the season and reset balances |
 | `/inscrire-joueur <member> <RiotID#TAG>` | Manage Server | Link someone else's account |
 | `/desinscrire-joueur <member>` | Manage Server | Stop tracking someone else - the only way out, on purpose |
 | `/salon [channel]` | Manage Server | Where games are announced |
@@ -329,6 +338,35 @@ Labels are derived from the tracked participants stored with the game, so they
 survive a restart. `WIN` still means the reference team internally — only the
 presentation changes, which keeps the payout maths untouched.
 
+### History, form and seasons
+
+Every resolved game writes one row per tracked player. That single table is
+what makes the rest cheap: `/historique` reads it instead of replaying
+MATCH-V5, and the taunts read it to know whether this is a third defeat in a
+row or a new personal record for deaths. The form is computed *before* the
+new row is written, so the current game is never counted twice.
+
+Rank snapshots are taken after each game, forcing a fresh LEAGUE-V4 read: the
+cached value is up to six hours old and would still report the rank from
+before the game. A snapshot is only stored when the rank actually moved.
+
+A season opens on first use. `/cloturer-saison` freezes the standings into an
+archive, resets every balance to the starting amount, and immediately opens
+the next one so betting is never blocked. **Balances reset, history does
+not** - `/historique` still shows everything.
+
+### Backups and failure alerts
+
+The bot snapshots its own database once a day into `data/backups/`, keeping
+the last seven. It uses the SQLite backup API rather than copying the file,
+which is the only way to get a consistent snapshot while WAL mode is writing.
+Doing it in-process rather than through cron means there is no server-side
+setup to forget, and it behaves the same on a VM, a Pi or Windows.
+
+When Riot rejects the API key, the bot posts in the announcement channel
+instead of failing silently. Without it the only symptom is that games stop
+being detected, with the reason buried in the server logs.
+
 ### Parimutuel payouts
 
 ```
@@ -376,6 +414,9 @@ knowing:
 | `LOLBET_DAILY_AMOUNT` | `100` | `/daily` grant |
 | `LOLBET_USE_THREADS` | `false` | `true` puts the lock notice and recap in a thread instead of the channel |
 | `LOLBET_ANNOUNCE_LOCK` | `true` | Post a message when the betting window closes |
+| `LOLBET_BACKUP_ENABLED` | `true` | Daily SQLite snapshot into `data/backups/` |
+| `LOLBET_BACKUP_KEEP` | `7` | How many daily snapshots to keep |
+| `LOLBET_ALERT_BAD_KEY` | `true` | Post in Discord when the Riot key is refused |
 | `LOLBET_DEV_GUILD_ID` | unset | Set it for instant slash-command sync while developing |
 
 ---
@@ -416,7 +457,11 @@ src/lolbet/
     tracker.py         poll + maintenance loops
     betting.py         parimutuel pool + wallets
     scoring.py         MVP / worst player
-    taunts.py          fin-de-partie banter
+    taunts.py          fin-de-partie banter, history-aware
+    history.py         frozen per-game stats, form and streaks
+    progression.py     rank snapshots and LP movement
+    seasons.py         season lifecycle and frozen standings
+    backup.py          daily SQLite snapshots
     embeds.py          all Discord rendering
     enrichment.py      spectator payload → embed model
     messages.py        debounced message edits

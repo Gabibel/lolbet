@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import random
 
+from .history import PlayerForm
 from .scoring import PlayerScore
 
 # Seuils qui décident de la catégorie de vanne.
@@ -21,6 +22,8 @@ KDA_GREAT = 4.0
 LOW_VISION = 10
 LOW_CS_PER_MIN = 3.0
 MIN_MINUTES_FOR_DETAIL = 20
+# En dessous, une série n'a rien de remarquable.
+STREAK_THRESHOLD = 3
 
 LVP_LINE = "\N{POLICE CAR} LVP de la partie : {mention} - direction la prison !"
 MVP_LINE = "\N{GLOWING STAR} MVP de la partie : {mention} - savoure, c'est rare."
@@ -87,6 +90,31 @@ TAUNTS: dict[str, tuple[str, ...]] = {
         "Solide. On te laisse tranquille pour cette fois.",
         "Bien joué. Voilà, c'est dit, n'en parlons plus.",
     ),
+    # Catégories qui regardent l'historique, pas seulement la partie.
+    "first_game": (
+        "Première partie enregistrée. Le compteur démarre maintenant.",
+        "Bienvenue. À partir de maintenant, tout est archivé.",
+        "Première ligne à ton dossier. Il va falloir vivre avec.",
+    ),
+    "record_deaths": (
+        "Nouveau record personnel : {deaths} morts. On grave ça quelque part.",
+        "{deaths} morts, ton pire total à ce jour. Félicitations, j'imagine.",
+        "Jamais tu n'étais mort autant. Le plafond était plus haut que prévu.",
+        "{deaths} morts : record battu. Certains sommets ne se cherchent pas.",
+    ),
+    "streak_lost": (
+        "{streak} défaites d'affilée. Ce n'est plus une passe, c'est une trajectoire.",
+        "{streak} de suite. Une pause, peut-être ?",
+        "{streak}e défaite consécutive. Le classement, lui, s'en souvient.",
+        "Toujours pas de victoire depuis {streak} parties. Courage.",
+        "{streak} défaites de rang. À ce stade c'est une méthode.",
+    ),
+    "streak_won": (
+        "{streak} victoires d'affilée. Profite, la moyenne finit toujours par revenir.",
+        "{streak} de suite. Quelqu'un a changé de compte ?",
+        "{streak}e victoire consécutive. On commence à te croire.",
+        "{streak} d'affilée. Personne ne t'arrête, pour l'instant.",
+    ),
 }
 
 DETAIL_JABS: tuple[tuple[str, str], ...] = (
@@ -96,12 +124,40 @@ DETAIL_JABS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _category(score: PlayerScore, *, is_mvp: bool, is_worst: bool) -> str:
+def _category(
+    score: PlayerScore,
+    *,
+    is_mvp: bool,
+    is_worst: bool,
+    form: PlayerForm | None = None,
+) -> str:
+    """Choisit la catégorie la plus spécifique qui s'applique."""
     won = score.win
+
+    # Un joueur sans historique n'a ni série ni record à commenter.
+    if form is not None and form.is_new:
+        return "first_game"
+
+    # Un record personnel de morts prime : c'est plus précis que tout le reste.
+    if (
+        form is not None
+        and score.deaths >= DEATHS_FED
+        and score.deaths > form.worst_deaths
+    ):
+        return "record_deaths"
+
     if is_worst:
         return "worst_won" if won else "worst_lost"
     if is_mvp:
         return "mvp_won" if won else "mvp_lost"
+
+    # La série inclut la partie qui vient de se jouer.
+    if form is not None:
+        streak = form.winning_streak + 1 if won else form.losing_streak + 1
+        broke_streak = (won and form.streak < 0) or (not won and form.streak > 0)
+        if not broke_streak and streak >= STREAK_THRESHOLD:
+            return "streak_won" if won else "streak_lost"
+
     if score.deaths >= DEATHS_FED:
         return "fed_won" if won else "fed_lost"
     if score.kda_ratio < KDA_BAD:
@@ -138,11 +194,20 @@ def taunt_for(
     is_worst: bool,
     duration_seconds: int,
     seed: str = "",
+    form: PlayerForm | None = None,
 ) -> str:
-    """Une phrase pour ce joueur, plus éventuellement une pique statistique."""
+    """Une phrase pour ce joueur, plus éventuellement une pique statistique.
+
+    ``form`` est l'historique *avant* cette partie : il permet de parler de
+    séries et de records, ce qu'une partie isolée ne dit pas.
+    """
     rng = random.Random(f"{seed}:{score.puuid}")
-    line = rng.choice(TAUNTS[_category(score, is_mvp=is_mvp, is_worst=is_worst)])
-    line = line.format(deaths=score.deaths)
+    category = _category(score, is_mvp=is_mvp, is_worst=is_worst, form=form)
+    line = rng.choice(TAUNTS[category])
+    streak = 0
+    if form is not None:
+        streak = (form.winning_streak if score.win else form.losing_streak) + 1
+    line = line.format(deaths=score.deaths, streak=streak)
 
     # On n'enfonce que ceux qui le méritent : jamais un MVP.
     if not is_mvp and (score.deaths >= DEATHS_FED or score.kda_ratio < KDA_BAD or is_worst):
@@ -158,6 +223,7 @@ def build_taunt_content(
     *,
     seed: str = "",
     max_lines: int = 5,
+    forms: dict[str, PlayerForm] | None = None,
 ) -> str:
     """Le texte posté au-dessus du récapitulatif.
 
@@ -179,6 +245,7 @@ def build_taunt_content(
             is_worst=puuid == worst_puuid,
             duration_seconds=scores.duration_seconds,
             seed=seed,
+            form=(forms or {}).get(puuid),
         )
         lines.append(f"<@{discord_id}> {phrase}")
 

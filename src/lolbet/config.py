@@ -81,6 +81,16 @@ class Settings(BaseSettings):
     use_threads: bool = False
     announce_lock: bool = True
 
+    # Sauvegardes automatiques de la base SQLite.
+    backup_enabled: bool = True
+    backup_keep: int = Field(default=7, ge=1)
+    backup_interval_hours: int = Field(default=24, ge=1)
+
+    # Prevenir dans Discord quand la cle Riot est refusee, au plus
+    # une fois par fenetre : sans ca, la panne est totalement muette.
+    alert_bad_key: bool = True
+    alert_cooldown_hours: int = Field(default=6, ge=1)
+
     # Logging
     log_level: str = "INFO"
     log_json: bool = False

@@ -22,6 +22,7 @@ log = get_logger(__name__)
 COGS = (
     "lolbet.cogs.registration",
     "lolbet.cogs.betting",
+    "lolbet.cogs.stats",
     "lolbet.cogs.admin",
 )
 

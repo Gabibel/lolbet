@@ -18,7 +18,7 @@ import asyncio
 import json
 import random
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import discord
@@ -32,6 +32,9 @@ from ..models import (
     TrackedGame,
     TrackedParticipant,
 )
+from .backup import backup_async, database_path
+from .history import player_form, record_game_stats
+from .progression import capture_after_game
 from ..riot.client import RiotAPIError, RiotUnauthorized, build_match_id
 from ..utils import as_utc, from_epoch_ms, utcnow
 from .betting import Pool
@@ -40,6 +43,7 @@ from .embeds import (
     build_game_embed,
     build_lock_embed,
     build_result_embed,
+    build_bad_key_embed,
     build_void_embed,
     queue_name,
     side_labels_for,
@@ -56,6 +60,7 @@ log = get_logger(__name__)
 # A game that never disappears from spectator (player unregistered, Riot bug)
 # would otherwise hold bets hostage forever.
 MAX_GAME_AGE = timedelta(hours=3)
+BACKUP_CHECK_EVERY = timedelta(minutes=30)
 CACHE_PURGE_EVERY = timedelta(hours=1)
 RESOLVE_BACKOFF_BASE = 30  # seconds, doubled per attempt, capped below
 RESOLVE_BACKOFF_MAX = 300
@@ -78,6 +83,8 @@ class GameTracker:
         self._tasks: list[asyncio.Task[None]] = []
         self._stopping = asyncio.Event()
         self._last_cache_purge = utcnow()
+        self._last_backup = utcnow() - timedelta(days=1)
+        self._last_key_alert: datetime | None = None
 
     # -- lifecycle --------------------------------------------------------
 
@@ -133,6 +140,7 @@ class GameTracker:
                     await self._poll_target(target)
                 except RiotUnauthorized as exc:
                     log.error("tracker.bad_api_key", error=str(exc))
+                    await self._alert_bad_key()
                     await self._sleep(60)
                     break
                 except RiotAPIError as exc:
@@ -450,6 +458,7 @@ class GameTracker:
                 await self._resolve_pending()
                 await self._expire_stale()
                 await self._housekeeping()
+                await self._maybe_backup()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # pragma: no cover - defensive
@@ -598,8 +607,16 @@ class GameTracker:
                 .scalars()
                 .all()
             )
+            # La forme est lue AVANT d'enregistrer la partie : c'est ce
+            # qui permet de dire « troisième défaite d'affilée » plutôt
+            # que de compter la partie en cours deux fois.
+            forms = {
+                p.puuid: await player_form(session, game.guild_id, p.discord_id)
+                for p in participants
+            }
             tracked_won = winning_team == game.tracked_team_id
             settlement = await bot.betting.settle(session, game, tracked_won)
+            await record_game_stats(session, game, scores, participants)
             game.status = GameStatus.RESOLVED
             game.winning_team_id = winning_team
             game.resolved_at = utcnow()
@@ -619,6 +636,7 @@ class GameTracker:
             scores,
             {p.puuid: p.discord_id for p in participants},
             seed=snapshot[0],
+            forms=forms,
         )
         embed = build_result_embed(
             riot_game_id=snapshot[0],
@@ -631,6 +649,7 @@ class GameTracker:
         )
         await self._post_followup(game_id, embed, content=taunts)
         await bot.updater.refresh(game_id)
+        await self._capture_ranks(game_id, participants)
         log.info(
             "tracker.resolved",
             game=snapshot[0],
@@ -713,6 +732,72 @@ class GameTracker:
                 )
         except discord.Forbidden as exc:
             log.warning("tracker.followup_failed", game=game.riot_game_id, error=str(exc))
+
+    async def _capture_ranks(self, game_id: int, participants: list) -> None:
+        """Relève le rang des joueurs suivis juste après la partie."""
+        bot = self._bot
+        async with bot.session_factory() as session:
+            game = await session.get(TrackedGame, game_id)
+            if game is None:
+                return
+            for participant in participants:
+                try:
+                    await capture_after_game(
+                        session,
+                        bot.riot,
+                        puuid=participant.puuid,
+                        platform=game.platform,
+                        game_id=game_id,
+                    )
+                except Exception as exc:  # jamais bloquant
+                    log.warning("tracker.rank_capture_failed", error=str(exc))
+            await session.commit()
+
+    async def _alert_bad_key(self) -> None:
+        """Prévient dans Discord que la clé Riot est refusée."""
+        bot = self._bot
+        if not bot.settings.alert_bad_key:
+            return
+        now = utcnow()
+        cooldown = timedelta(hours=bot.settings.alert_cooldown_hours)
+        if self._last_key_alert and now - self._last_key_alert < cooldown:
+            return
+        self._last_key_alert = now
+
+        async with bot.session_factory() as session:
+            configs = (
+                (await session.execute(select(GuildConfig)))
+                .scalars()
+                .all()
+            )
+
+        embed = build_bad_key_embed()
+        for config in configs:
+            if not config.announce_channel_id:
+                continue
+            channel = bot.get_channel(config.announce_channel_id)
+            if not isinstance(channel, discord.abc.Messageable):
+                continue
+            try:
+                await channel.send(embed=embed)
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                log.warning("tracker.alert_failed", error=str(exc))
+
+    async def _maybe_backup(self) -> None:
+        """Sauvegarde la base une fois par jour."""
+        bot = self._bot
+        if not bot.settings.backup_enabled:
+            return
+        now = utcnow()
+        if now - self._last_backup < timedelta(
+            hours=bot.settings.backup_interval_hours
+        ):
+            return
+        self._last_backup = now
+        path = database_path(bot.settings.database_url)
+        if path is None:
+            return
+        await backup_async(path, keep=bot.settings.backup_keep)
 
     async def _housekeeping(self) -> None:
         now = utcnow()
