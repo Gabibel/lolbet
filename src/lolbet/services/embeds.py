@@ -63,6 +63,47 @@ MASTERY_DISCLAIMER = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class SideLabels:
+    """Comment nommer les deux côtés du pari.
+
+    En temps normal c'est VICTOIRE / DÉFAITE de l'équipe suivie. Quand des
+    joueurs inscrits sont dans les deux équipes, parier « défaite » n'a plus
+    de sens : on nomme alors les deux camps par leurs joueurs.
+    """
+
+    win: str = "VICTOIRE"
+    loss: str = "DÉFAITE"
+    duel: bool = False
+
+    def of(self, side: str | None) -> str:
+        if side == BetSide.WIN:
+            return self.win
+        if side == BetSide.LOSS:
+            return self.loss
+        return str(side)
+
+
+def short_name(riot_id: str) -> str:
+    return (riot_id or "?").split("#")[0]
+
+
+def side_labels_for(tracked, tracked_team_id: int) -> SideLabels:
+    """``tracked`` : objets ayant .team_id et .riot_id (PlayerCard ou ligne DB)."""
+    by_team: dict[int, list[str]] = {}
+    for entry in tracked:
+        by_team.setdefault(int(entry.team_id), []).append(short_name(entry.riot_id))
+    if len(by_team) < 2:
+        return SideLabels()
+
+    other_team = next(team for team in by_team if team != tracked_team_id)
+    return SideLabels(
+        win=", ".join(by_team.get(tracked_team_id, []))[:70] or "Équipe suivie",
+        loss=", ".join(by_team[other_team])[:70] or "Adversaires",
+        duel=True,
+    )
+
+
 def _side_label(side: str | None) -> str:
     return {"WIN": "VICTOIRE", "LOSS": "DÉFAITE"}.get(side or "", str(side))
 
@@ -112,6 +153,10 @@ class GameCard:
 
     def average_elo(self, team_id: int) -> float | None:
         return average_score([p.rank for p in self.team(team_id)])
+
+    @property
+    def labels(self) -> SideLabels:
+        return side_labels_for(self.tracked, self.tracked_team_id)
 
 
 def _mastery_text(player: PlayerCard) -> str:
@@ -173,19 +218,20 @@ def _favourite_line(card: GameCard) -> str | None:
     )
 
 
-def _odds_value(pool: Pool, tracked_team_name: str) -> str:
+def _odds_value(pool: Pool, tracked_team_name: str, labels: SideLabels) -> str:
     if pool.count == 0:
         return "Aucun pari pour l'instant. Le premier fixe la cote."
     rows = []
-    for side, label in ((BetSide.WIN, "VICTOIRE"), (BetSide.LOSS, "DÉFAITE")):
+    for side, label in ((BetSide.WIN, labels.win), (BetSide.LOSS, labels.loss)):
         amount = pool.win_amount if side == BetSide.WIN else pool.loss_amount
         count = pool.win_count if side == BetSide.WIN else pool.loss_count
         multiplier = pool.multiplier(side)
         odds = f"x{multiplier:.2f}" if multiplier else "-"
         rows.append(f"**{label}** {amount:,} pièces ({count}) → {odds}")
     implied = pool.implied_probability(BetSide.WIN)
+    who = labels.win if labels.duel else tracked_team_name
     backing = (
-        f"\nLa cagnotte donne {tracked_team_name} à {implied * 100:.0f}%"
+        f"\nLa cagnotte donne {who} à {implied * 100:.0f}%"
         if implied is not None
         else ""
     )
@@ -235,10 +281,20 @@ def build_game_embed(
         embed.add_field(name="Elo moyen", value=favourite, inline=False)
 
     tracked_team_name = TEAM_NAMES.get(card.tracked_team_id, "l'équipe suivie")
+    labels = card.labels
+    if labels.duel:
+        embed.add_field(
+            name="\N{CROSSED SWORDS} Duel entre inscrits",
+            value=(
+                f"**{labels.win}** contre **{labels.loss}**. "
+                "Le pari porte sur qui des deux gagne."
+            ),
+            inline=False,
+        )
     if locked:
         embed.add_field(
             name="\N{LOCK} Paris fermés",
-            value=_odds_value(pool, tracked_team_name),
+            value=_odds_value(pool, tracked_team_name, labels),
             inline=False,
         )
     else:
@@ -249,7 +305,7 @@ def build_game_embed(
         )
         embed.add_field(
             name=f"\N{MONEY BAG} Paris ouverts – {lock_note}",
-            value=_odds_value(pool, tracked_team_name),
+            value=_odds_value(pool, tracked_team_name, labels),
             inline=False,
         )
 
@@ -316,13 +372,22 @@ def build_result_embed(
     ddragon: DDragon,
 ) -> discord.Embed:
     won = scores.winning_team_id == tracked_team_id
+    tracked_scores = [s for s in scores.players if s.puuid in tracked_puuids]
+    labels = side_labels_for(tracked_scores, tracked_team_id)
     headline = f"{EMOJI_TROPHY} VICTOIRE" if won else f"{EMOJI_DEFEAT} DÉFAITE"
     tracked_team_name = TEAM_NAMES.get(tracked_team_id, "Équipe suivie")
     blue_kills = scores.team_kills.get(BLUE_TEAM, 0)
     red_kills = scores.team_kills.get(RED_TEAM, 0)
 
+    if labels.duel:
+        # Un inscrit gagne, un autre perd : titrer sur une seule équipe
+        # serait faux pour la moitié des joueurs suivis.
+        winner = labels.win if won else labels.loss
+        headline = f"{EMOJI_TROPHY} {winner} l'emporte"
+        tracked_team_name = f"{labels.win} vs {labels.loss}"
+
     embed = discord.Embed(
-        title=f"{headline} - {tracked_team_name}",
+        title=(f"{headline}" if labels.duel else f"{headline} - {tracked_team_name}")[:256],
         colour=COLOUR_WIN if won else COLOUR_LOSS,
         description=(
             f"**{queue_name(queue_id)}** • {format_duration(scores.duration_seconds)} • "
@@ -330,7 +395,6 @@ def build_result_embed(
         ),
     )
 
-    tracked_scores = [s for s in scores.players if s.puuid in tracked_puuids]
     if tracked_scores:
         embed.add_field(
             name="Joueurs suivis",
@@ -353,7 +417,9 @@ def build_result_embed(
 
     if settlement is not None:
         embed.add_field(
-            name="\N{MONEY BAG} Gains", value=_payout_value(settlement), inline=False
+            name="\N{MONEY BAG} Gains",
+            value=_payout_value(settlement, labels),
+            inline=False,
         )
 
     embed.set_footer(
@@ -362,7 +428,7 @@ def build_result_embed(
     return embed
 
 
-def _payout_value(settlement: Settlement) -> str:
+def _payout_value(settlement: Settlement, labels: SideLabels | None = None) -> str:
     if settlement.pool.count == 0:
         return "Personne n'a parié sur celle-là."
     if settlement.refunded:
@@ -372,7 +438,7 @@ def _payout_value(settlement: Settlement) -> str:
         )
     lines = [
         f"Cagnotte **{settlement.pool.total:,}** pièces • côté gagnant : "
-        f"**{_side_label(settlement.winning_side)}**"
+        f"**{(labels or SideLabels()).of(settlement.winning_side)}**"
     ]
     winners = sorted(settlement.paid, key=lambda row: row[2], reverse=True)[:10]
     for user_id, stake, payout in winners:
@@ -397,6 +463,7 @@ def build_lock_embed(
     bets: list,
     tracked_team_name: str,
     window_seconds: int,
+    labels: SideLabels | None = None,
 ) -> discord.Embed:
     """Posted in the channel when the betting window closes.
 
@@ -415,10 +482,16 @@ def build_lock_embed(
         ),
     )
 
-    for side, label, emoji in (
-        (BetSide.WIN, f"{tracked_team_name} gagne", EMOJI_TROPHY),
-        (BetSide.LOSS, f"{tracked_team_name} perd", EMOJI_DEFEAT),
-    ):
+    labels = labels or SideLabels()
+    sides = (
+        ((BetSide.WIN, labels.win, EMOJI_TROPHY), (BetSide.LOSS, labels.loss, EMOJI_DEFEAT))
+        if labels.duel
+        else (
+            (BetSide.WIN, f"{tracked_team_name} gagne", EMOJI_TROPHY),
+            (BetSide.LOSS, f"{tracked_team_name} perd", EMOJI_DEFEAT),
+        )
+    )
+    for side, label, emoji in sides:
         amount = pool.win_amount if side == BetSide.WIN else pool.loss_amount
         side_bets = [bet for bet in bets if bet.side == side]
         multiplier = pool.multiplier(side)

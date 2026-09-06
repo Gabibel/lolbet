@@ -18,7 +18,7 @@ from sqlalchemy import select
 from ..logging_conf import get_logger
 from ..models import TrackedGame, TrackedParticipant
 from ..utils import as_utc
-from .embeds import build_game_embed
+from .embeds import build_game_embed, side_labels_for
 from .enrichment import build_card
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -109,7 +109,8 @@ class MessageUpdater:
 
         from ..views import view_for  # local import avoids a circular import
 
-        await self.edit(game, embed=embed, view=view_for(game))
+        labels = side_labels_for(participants, game.tracked_team_id)
+        await self.edit(game, embed=embed, view=view_for(game, labels))
 
         if allow_fetch and card.enriched and not game.enriched:
             async with bot.session_factory() as session:

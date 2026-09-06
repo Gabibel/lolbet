@@ -42,6 +42,7 @@ from .embeds import (
     build_result_embed,
     build_void_embed,
     queue_name,
+    side_labels_for,
 )
 from .enrichment import base_card, find_team_id
 from .scoring import score_match
@@ -358,7 +359,9 @@ class GameTracker:
 
         from ..views import BetView
 
-        view = BetView(game_id) if stored_status == GameStatus.LIVE else None
+        view = (
+            BetView(game_id, card.labels) if stored_status == GameStatus.LIVE else None
+        )
         try:
             message = await channel.send(embed=embed, view=view)
         except discord.Forbidden:
@@ -506,8 +509,9 @@ class GameTracker:
             tracked_names=[p.riot_id for p in participants] or [game.riot_game_id],
             pool=pool,
             bets=bets,
-            tracked_team_name=TEAM_NAMES.get(game.tracked_team_id, "The tracked team"),
+            tracked_team_name=TEAM_NAMES.get(game.tracked_team_id, "L'équipe suivie"),
             window_seconds=bot.settings.bet_lock_seconds,
+            labels=side_labels_for(participants, game.tracked_team_id),
         )
         await self._post_followup(game_id, embed)
 

@@ -14,7 +14,8 @@ import discord
 
 from .logging_conf import get_logger
 from .models import BetSide, GameStatus, TrackedGame
-from .services.betting import BettingError
+from .services.betting import BettingError, Pool
+from .services.embeds import SideLabels, side_labels_for
 from .utils import format_coins
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -117,14 +118,15 @@ class BetAmountModal(discord.ui.Modal):
                 return
             await session.commit()
             pool = await bot.betting.pool(session, self.game_id)
+        participants = await _tracked_participants(bot, self.game_id)
+        labels = side_labels_for(participants, game.tracked_team_id)
 
         multiplier = pool.multiplier(self.side)
         odds = f" à ~x{multiplier:.2f}" if multiplier else ""
         await interaction.response.send_message(
             f"Pari enregistré : **{format_coins(bet.amount)}** sur "
-            f"**{SIDE_LABELS[self.side]}**{odds}.\n"
-            f"Solde : {format_coins(wallet.balance)} pièces. "
-            "Tu peux encore utiliser `/annulerpari` avant la fermeture.",
+            f"**{labels.of(self.side)}**{odds}.\n"
+            f"Solde : {format_coins(wallet.balance)} pièces. {COMMANDS_HELP}",
             ephemeral=True,
         )
         bot.updater.schedule(self.game_id)
@@ -141,13 +143,16 @@ class BetAmountModal(discord.ui.Modal):
 
 
 class BetButton(discord.ui.DynamicItem[discord.ui.Button], template=BET_PATTERN):
-    def __init__(self, game_id: int, side: str) -> None:
+    def __init__(self, game_id: int, side: str, label: str | None = None) -> None:
         self.game_id = game_id
         self.side = side
         win = side == BetSide.WIN
+        # Le libellé affiché est celui du message déjà posté ; celui-ci ne
+        # sert qu'à reconstruire le bouton après un redémarrage.
+        text = label or SIDE_LABELS[side]
         super().__init__(
             discord.ui.Button(
-                label=f"Parier {SIDE_LABELS[side]}",
+                label=f"Parier {text}"[:80],
                 style=discord.ButtonStyle.success if win else discord.ButtonStyle.danger,
                 custom_id=f"lolbet:bet:{game_id}:{side}",
                 emoji="\N{CHART WITH UPWARDS TREND}" if win else "\N{CHART WITH DOWNWARDS TREND}",
@@ -190,8 +195,15 @@ class BetButton(discord.ui.DynamicItem[discord.ui.Button], template=BET_PATTERN)
             )
             return
 
-        await interaction.response.send_modal(
-            BetAmountModal(self.game_id, self.side, wallet.balance)
+        async with bot.session_factory() as session:
+            pool = await bot.betting.pool(session, self.game_id)
+            participants = await _tracked_participants(bot, self.game_id)
+        labels = side_labels_for(participants, game.tracked_team_id)
+
+        await interaction.response.send_message(
+            content=bet_panel_text(self.side, wallet.balance, pool, labels),
+            view=BetPanelView(self.game_id, self.side, wallet.balance),
+            ephemeral=True,
         )
 
 
@@ -242,18 +254,149 @@ class CancelBetButton(discord.ui.DynamicItem[discord.ui.Button], template=CANCEL
         bot.updater.schedule(self.game_id)
 
 
+QUICK_AMOUNTS = (100, 250, 500, 1000)
+
+COMMANDS_HELP = (
+    "`/solde` ton solde • `/quotidien` +100 par jour • "
+    "`/paris` tes paris en cours • `/annulerpari` annuler avant la fermeture"
+)
+
+
+async def _tracked_participants(bot: LoLBet, game_id: int) -> list:
+    """Les inscrits présents dans cette partie, pour nommer les deux camps."""
+    from sqlalchemy import select
+
+    from .models import TrackedParticipant
+
+    async with bot.session_factory() as session:
+        rows = await session.execute(
+            select(TrackedParticipant).where(TrackedParticipant.game_id == game_id)
+        )
+        return list(rows.scalars().all())
+
+
+def bet_panel_text(
+    side: str, balance: int, pool: Pool, labels: SideLabels | None = None
+) -> str:
+    """Ce que le joueur voit après avoir cliqué sur Parier."""
+    labels = labels or SideLabels()
+    multiplier = pool.multiplier(side)
+    odds = f"cote actuelle **x{multiplier:.2f}**" if multiplier else "personne n'a encore parié de ce côté"
+    lines = [
+        f"\N{MONEY BAG} Ton solde : **{format_coins(balance)}** pièces",
+        f"Tu paries sur **{labels.of(side)}** - {odds}.",
+    ]
+    if pool.count:
+        lines.append(
+            f"Cagnotte : **{pool.total:,}** pièces "
+            f"({labels.win} {pool.win_amount:,} / {labels.loss} {pool.loss_amount:,})"
+        )
+    if balance <= 0:
+        lines.append("Tu n'as plus rien à miser. `/quotidien` te redonne 100 pièces.")
+    else:
+        lines.append("Choisis un montant ci-dessous, ou saisis-le toi-même.")
+    lines.append(f"\n{COMMANDS_HELP}")
+    return "\n".join(lines)
+
+
+class QuickBetButton(discord.ui.Button):
+    """Un montant prêt à cliquer dans le panneau éphémère."""
+
+    def __init__(self, game_id: int, side: str, amount: int, label: str) -> None:
+        super().__init__(label=label, style=discord.ButtonStyle.primary)
+        self.game_id = game_id
+        self.side = side
+        self.amount = amount
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await _place_and_confirm(interaction, self.game_id, self.side, self.amount)
+
+
+class CustomAmountButton(discord.ui.Button):
+    def __init__(self, game_id: int, side: str, balance: int) -> None:
+        super().__init__(label="Montant libre...", style=discord.ButtonStyle.secondary)
+        self.game_id = game_id
+        self.side = side
+        self.balance = balance
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(
+            BetAmountModal(self.game_id, self.side, self.balance)
+        )
+
+
+class BetPanelView(discord.ui.View):
+    """Panneau éphémère : montants rapides + saisie libre.
+
+    Éphémère et propre à une interaction, donc pas besoin de DynamicItem :
+    il disparaît de lui-même et n'a pas à survivre à un redémarrage.
+    """
+
+    def __init__(self, game_id: int, side: str, balance: int) -> None:
+        super().__init__(timeout=120)
+        for amount in QUICK_AMOUNTS:
+            if amount <= balance:
+                self.add_item(
+                    QuickBetButton(game_id, side, amount, format_coins(amount))
+                )
+        if balance > 0:
+            self.add_item(
+                QuickBetButton(game_id, side, balance, f"Tout ({format_coins(balance)})")
+            )
+        self.add_item(CustomAmountButton(game_id, side, balance))
+
+
+async def _place_and_confirm(
+    interaction: discord.Interaction, game_id: int, side: str, amount: int
+) -> None:
+    """Enregistre le pari et remplace le panneau par la confirmation."""
+    bot: LoLBet = interaction.client  # type: ignore[assignment]
+    async with bot.session_factory() as session:
+        game = await session.get(TrackedGame, game_id)
+        if game is None:
+            await interaction.response.edit_message(
+                content="Cette partie n'est plus suivie.", view=None
+            )
+            return
+        try:
+            bet, wallet = await bot.betting.place_bet(
+                session, game, interaction.user.id, side, amount
+            )
+        except BettingError as exc:
+            await session.rollback()
+            await interaction.response.edit_message(content=str(exc), view=None)
+            return
+        await session.commit()
+        pool = await bot.betting.pool(session, game_id)
+        participants = await _tracked_participants(bot, game_id)
+
+    labels = side_labels_for(participants, game.tracked_team_id)
+    multiplier = pool.multiplier(side)
+    odds = f" à ~x{multiplier:.2f}" if multiplier else ""
+    await interaction.response.edit_message(
+        content=(
+            f"Pari enregistré : **{format_coins(bet.amount)}** sur "
+            f"**{labels.of(side)}**{odds}.\n"
+            f"Solde : {format_coins(wallet.balance)} pièces. {COMMANDS_HELP}"
+        ),
+        view=None,
+    )
+    bot.updater.schedule(game_id)
+
+
 class BetView(discord.ui.View):
     """Les trois boutons attachés à une annonce de partie en cours."""
 
-    def __init__(self, game_id: int) -> None:
+    def __init__(self, game_id: int, labels: SideLabels | None = None) -> None:
         super().__init__(timeout=None)
-        self.add_item(BetButton(game_id, BetSide.WIN))
-        self.add_item(BetButton(game_id, BetSide.LOSS))
+        labels = labels or SideLabels()
+        self.add_item(BetButton(game_id, BetSide.WIN, labels.win))
+        self.add_item(BetButton(game_id, BetSide.LOSS, labels.loss))
         self.add_item(CancelBetButton(game_id))
 
 
-def view_for(game: TrackedGame) -> BetView | None:
+def view_for(game: TrackedGame, labels: SideLabels | None = None) -> BetView | None:
     """Les boutons tant que les paris sont ouverts, plus rien ensuite."""
     if game.status != GameStatus.LIVE or game.id is None:
         return None
-    return BetView(game.id)
+    return BetView(game.id, labels)

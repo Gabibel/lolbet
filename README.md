@@ -22,10 +22,11 @@ real-money path anywhere in the code and nothing to add one to.
 
 1. **Register** — `/inscription Faker#KR1 kr` links a Riot ID to a Discord user.
 2. **Detect** — the tracker polls SPECTATOR-V5 for every registered PUUID and
-   posts one embed per game (even if five registered users are in it together).
-3. **Bet** — *Bet WIN* / *Bet LOSS* buttons open a modal. Parimutuel pool, 0%
-   rake, live implied odds on the embed. Bets lock 5 minutes after the game
-   started.
+   posts one embed per game, however many registered users are in it. If they
+   are on opposite teams the bet becomes a duel between them (see below).
+3. **Bet** — clicking a bet button opens a private panel showing your balance,
+   the live odds, the pool, one-click amounts and the commands you can use.
+   Parimutuel pool, 0% rake. Bets lock 5 minutes after the game started.
 4. **Lock** — when the window closes, a message recaps the final pool and who
    backed which side.
 5. **Recap** — when the game ends, the match is fetched from MATCH-V5 and a
@@ -130,6 +131,20 @@ bottleneck is the Riot rate limit, not the hardware.
 Put `data/` on the SD card only if you have to; an external USB SSD will
 outlive it. SQLite in WAL mode writes little, but SD cards are SD cards.
 
+### Why not Vercel, Netlify or any serverless host
+
+They cannot run this bot, whatever the plan:
+
+- it holds a **permanent websocket** to Discord, while serverless functions are
+  killed after seconds;
+- it **polls every 60 seconds**, while free serverless cron is daily at best;
+- it stores everything in **SQLite on local disk**, and serverless filesystems
+  are wiped between invocations.
+
+Rewriting it as an HTTP-interactions bot would fix the first point and none of
+the others, and would force a hosted database - which breaks the free-forever
+constraint. Use the Oracle Always Free VM or a Pi.
+
 ### Docker (optional)
 
 [`deploy/Dockerfile`](deploy/Dockerfile) builds a slim ARM64-capable image. It
@@ -219,6 +234,21 @@ of delaying the announcement behind them.
 
 Mastery, rank and average elo are presented as raw information for bettors to
 judge. The embed says so, and the code never claims they predict the outcome.
+
+### Several registered players in one game
+
+One announcement per game, never one per player. What changes is who the bet
+is about:
+
+- **Same team** (duo, five-stack): the bet stays *their team wins* vs *loses*.
+- **Opposite teams**: betting on a "loss" would be meaningless, since one
+  tracked player wins either way. The two sides are relabelled with the
+  players' own names, the embed says it is a duel, and the recap is titled by
+  whoever won rather than by a team.
+
+Labels are derived from the tracked participants stored with the game, so they
+survive a restart. `WIN` still means the reference team internally — only the
+presentation changes, which keeps the payout maths untouched.
 
 ### Parimutuel payouts
 
