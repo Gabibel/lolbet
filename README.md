@@ -72,6 +72,13 @@ real-money path anywhere in the code and nothing to add one to.
 | `/ow-inscrits` | anyone | Every Overwatch account tracked here |
 | `/ow-inscrire-joueur <member> <BattleTag>` | Manage Server | Link someone else's account |
 | `/ow-desinscrire-joueur <member>` | Manage Server | Stop tracking someone else |
+| `/recap [days]` | anyone | The week in review, on demand |
+| `/trophees [member]` | anyone | Trophies and personal records |
+| `/duel <opponent> [member]` | anyone | Two players compared, overall and head to head |
+| `/cotes-morts` | anyone | Open over/under lines on the live game |
+| `/pari-morts <player> <over\|under> <amount>` | anyone | Bet on someone's death count |
+| `/mes-paris-morts` | anyone | Your open side bets |
+| `/annuler-pari-morts <player>` | anyone | Cancel a side bet before the lock |
 
 Betting itself happens on the buttons attached to each announcement.
 
@@ -396,6 +403,46 @@ understates the swing, but it does not invent one. A window that cannot be
 measured at all prints a dash, never a zero: `+0 LP` is a claim, and an
 unmeasured window is not one we can make.
 
+### The weekly digest
+
+The bot only ever spoke when someone was playing. Every Sunday at 20:00 local
+time it now posts the week in review to the announcement channel: who played,
+their record and KDA, the LP each of them gained or lost, the best and worst
+game, and the betting leaderboard. It reads only from tables that were frozen
+at settlement time, so it costs no Riot quota and a past week cannot change
+between two viewings. `/recap [days]` runs it on demand over any window.
+
+The scheduler is a plain loop that wakes every ten minutes and asks whether
+the slot has passed unserved, so a three-day outage does not lose the digest —
+it goes out on the next wake-up. It never sends more than one, and on a fresh
+install it does not backfill: with no reference point it records one and waits
+for the next real slot, rather than posting at a random moment.
+
+### Trophies, records and duels
+
+`/trophees` derives trophies from `player_game_stat` on the fly — nothing is
+stored, so a trophy removed from the code disappears cleanly instead of
+lingering in a table. `/duel` compares two players twice over: their overall
+form, and the games they actually played together, which is the only number
+that settles an argument. A zero-death game under fifteen minutes does not
+count as a clean sheet, for the same reason it never has here.
+
+### Side bets
+
+A one-sided game is boring to bet on: everyone can see who wins. `/pari-morts`
+opens a second market on how many times a tracked player will die. The line
+comes from their own recent average and is always a half point, so there is no
+tie to arbitrate; it freezes on the first bet, so two bettors are never trading
+against different lines. Odds follow the same bookmaker model as the main
+market and freeze when you bet.
+
+These live in their own `side_bet` table rather than in `bet`. The unique
+constraint on `bet` is `(user_id, game_id)` — one position per game — and
+rebuilding it on a database already holding real balances and settled history
+is a risk with no upside. A remake refunds them alongside everything else, and
+a target missing from the match payload is refunded rather than judged on data
+that is not there.
+
 ### Overwatch: rank tracking, and why there is nothing more
 
 Blizzard has never published an Overwatch API. Their developer platform covers
@@ -515,6 +562,10 @@ knowing:
 | `LOLBET_BACKUP_ENABLED` | `true` | Daily SQLite snapshot into `data/backups/` |
 | `LOLBET_BACKUP_KEEP` | `7` | How many daily snapshots to keep |
 | `LOLBET_ALERT_BAD_KEY` | `true` | Post in Discord when the Riot key is refused |
+| `LOLBET_DIGEST_ENABLED` | `true` | Weekly round-up |
+| `LOLBET_DIGEST_WEEKDAY` | `6` | 0 = Monday, 6 = Sunday |
+| `LOLBET_DIGEST_HOUR` | `20` | Hour, in `LOLBET_DIGEST_TIMEZONE` |
+| `LOLBET_DIGEST_TIMEZONE` | `Europe/Paris` | Falls back to UTC if unknown |
 | `LOLBET_OVERWATCH_ENABLED` | `true` | Overwatch rank tracking |
 | `LOLBET_OVERFAST_BASE_URL` | public instance | Point it at your own OverFast container to depend on nobody |
 | `LOLBET_OVERWATCH_POLL_SECONDS` | `900` | How often career profiles are re-read |
@@ -608,6 +659,11 @@ src/lolbet/
     progression.py     rank snapshots and LP movement
     seasons.py         season lifecycle and frozen standings
     backup.py          daily SQLite snapshots
+    digest.py          the weekly round-up, aggregated from frozen tables
+    digest_tracker.py  the loop that posts it
+    awards.py          trophies and personal records
+    headtohead.py      two players compared
+    props.py           over/under side bets on a player's deaths
     overwatch.py       Overwatch rank snapshots and what moved
     ow_tracker.py      the slow Overwatch poll loop
     ow_taunts.py       rank-change banter

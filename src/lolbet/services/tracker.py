@@ -691,6 +691,11 @@ class GameTracker:
             }
             tracked_won = winning_team == game.tracked_team_id
             settlement = await bot.betting.settle(session, game, tracked_won)
+            # Les paris annexes se reglent sur les morts constatees, pas
+            # sur l'issue : ils ont leur propre verdict.
+            await bot.props.settle(
+                session, game, {s.puuid: s.deaths for s in scores.players}
+            )
             await record_game_stats(session, game, scores, participants)
             game.status = GameStatus.RESOLVED
             game.winning_team_id = winning_team
@@ -745,6 +750,7 @@ class GameTracker:
             if game is None or game.status != GameStatus.PENDING_RESULT:
                 return
             settlement = await bot.betting.refund_all(session, game)
+            await bot.props.refund_all(session, game)
             game.status = GameStatus.VOID
             game.resolved_at = utcnow()
             session.add(game)
@@ -796,6 +802,7 @@ class GameTracker:
             if game is None or game.status == GameStatus.VOID:
                 return
             settlement = await bot.betting.refund_all(session, game)
+            await bot.props.refund_all(session, game)
             game.status = GameStatus.VOID
             game.resolved_at = utcnow()
             session.add(game)

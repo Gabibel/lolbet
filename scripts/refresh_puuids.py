@@ -34,6 +34,7 @@ from lolbet.models import (
     Player,
     PlayerGameStat,
     RankSnapshot,
+    SideBet,
     TrackedGame,
     TrackedParticipant,
 )
@@ -49,6 +50,9 @@ PUUID_COLUMNS = (
     (PlayerGameStat, PlayerGameStat.puuid),
     (RankSnapshot, RankSnapshot.puuid),
     (TrackedGame, TrackedGame.watcher_puuid),
+    # La cible d'un pari annexe : sans elle, un pari deja regle
+    # pointerait vers un identifiant que Riot ne reconnait plus.
+    (SideBet, SideBet.target_puuid),
 )
 
 # Entrées de cache qui contiennent ou indexent un PUUID périmé. Les résultats

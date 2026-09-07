@@ -14,7 +14,9 @@ from .riot.ddragon import DDragon
 from .overwatch.client import OverFastClient
 from .riot.ratelimit import build_default_limiter
 from .services.betting import BettingService
+from .services.digest_tracker import DigestScheduler
 from .services.messages import MessageUpdater
+from .services.props import PropService
 from .services.ow_tracker import OverwatchTracker
 from .services.tracker import GameTracker
 from .views import BetButton, CancelBetButton
@@ -27,6 +29,8 @@ COGS = (
     "lolbet.cogs.stats",
     "lolbet.cogs.admin",
     "lolbet.cogs.overwatch",
+    "lolbet.cogs.community",
+    "lolbet.cogs.props",
 )
 
 
@@ -59,9 +63,11 @@ class LoLBet(commands.Bot):
         self.ddragon = DDragon(self.cache)
 
         self.betting = BettingService(settings)
+        self.props = PropService(settings, self.betting)
         self.updater = MessageUpdater(self)
         self.tracker = GameTracker(self)
         self.ow_tracker = OverwatchTracker(self)
+        self.digest = DigestScheduler(self)
 
     async def setup_hook(self) -> None:
         await init_db(self.engine)
@@ -78,6 +84,7 @@ class LoLBet(commands.Bot):
         await self._sync_commands()
         self.tracker.start()
         self.ow_tracker.start()
+        self.digest.start()
 
     async def _sync_commands(self) -> None:
         try:
@@ -135,6 +142,7 @@ class LoLBet(commands.Bot):
         log.info("bot.closing")
         await self.tracker.stop()
         await self.ow_tracker.stop()
+        await self.digest.stop()
         await self.updater.close()
         await self.riot.aclose()
         await self.overfast.aclose()

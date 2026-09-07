@@ -59,6 +59,9 @@ class GuildConfig(SQLModel, table=True):
     announce_channel_id: int | None = Field(
         default=None, sa_column=Column(BigInteger, nullable=True)
     )
+    # Repère du bilan hebdomadaire. NULL = jamais posé : le planificateur
+    # l'initialise au premier passage plutôt que de rattraper le passé.
+    last_digest_at: datetime | None = None
     updated_at: datetime = Field(default_factory=utcnow)
 
 
@@ -156,6 +159,58 @@ class Bet(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
     payout: int | None = None
     settled_at: datetime | None = None
+
+
+class PropPick(StrEnum):
+    OVER = "OVER"
+    UNDER = "UNDER"
+
+
+class SideBet(SQLModel, table=True):
+    """Un pari annexe sur la performance d'un joueur, pas sur l'issue.
+
+    Table séparée de ``bet`` volontairement. ``bet`` porte une contrainte
+    d'unicité (user_id, game_id) qui interdit deux positions sur une même
+    partie ; la reconstruire sur une base en service ferait courir un risque
+    aux soldes et à l'historique déjà enregistrés. Un pari sur l'issue et un
+    pari sur les morts de quelqu'un sont deux objets différents de toute
+    façon.
+    """
+
+    __tablename__ = "side_bet"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "game_id",
+            "market",
+            "target_puuid",
+            name="uq_sidebet_user_game_market",
+        ),
+        Index("ix_sidebet_game", "game_id"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    game_id: int = Field(foreign_key="tracked_game.id")
+    guild_id: int = Field(sa_column=Column(BigInteger, nullable=False))
+    user_id: int = Field(sa_column=Column(BigInteger, nullable=False))
+
+    market: str = Field(default="DEATHS", max_length=16)
+    target_puuid: str = Field(max_length=100)
+    # Figé à la prise du pari : le Riot ID peut changer, le récap doit
+    # continuer à dire sur qui on avait parié.
+    target_name: str = Field(default="", max_length=64)
+    # Toujours un demi-point : une ligne entière autoriserait l'égalité,
+    # et il faudrait alors inventer une règle de remboursement.
+    line: float = 6.5
+    pick: str = Field(default=PropPick.OVER, max_length=8)
+
+    amount: int
+    odds: float = 0.0
+    created_at: datetime = Field(default_factory=utcnow)
+    payout: int | None = None
+    settled_at: datetime | None = None
+    # Valeur constatée à l'arrivée, gardée pour pouvoir réafficher le récap.
+    actual: int | None = None
 
 
 class ApiCacheEntry(SQLModel, table=True):

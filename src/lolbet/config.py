@@ -102,6 +102,16 @@ class Settings(BaseSettings):
     alert_bad_key: bool = True
     alert_cooldown_hours: int = Field(default=6, ge=1)
 
+    # Bilan hebdomadaire : le seul moment ou le bot parle sans qu'une
+    # partie vienne de se terminer.
+    digest_enabled: bool = True
+    # 0 = lundi, 6 = dimanche, comme datetime.weekday().
+    digest_weekday: int = Field(default=6, ge=0, le=6)
+    digest_hour: int = Field(default=20, ge=0, le=23)
+    # Heure locale : un bilan a 20h UTC tomberait a 22h en ete a Paris.
+    digest_timezone: str = "Europe/Paris"
+    digest_days: int = Field(default=7, ge=1, le=90)
+
     # Overwatch : suivi de rang uniquement.
     #
     # Blizzard n'a pas d'API Overwatch. OverFast lit la page de carriere

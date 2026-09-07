@@ -17,6 +17,9 @@ dependencies = [
     "aiosqlite>=0.20",
     "pydantic-settings>=2.4",
     "structlog>=24.1",
+    # zoneinfo lit la base du systeme sous Linux mais n'a rien sous Windows :
+    # le recap hebdomadaire doit tomber a la bonne heure locale des deux cotes.
+    "tzdata>=2024.1; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

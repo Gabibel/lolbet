@@ -65,6 +65,7 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
 # existent deja, donc une nouvelle colonne doit etre ajoutee a la main.
 ADDED_COLUMNS: dict[tuple[str, str], str] = {
     ("bet", "odds"): "FLOAT NOT NULL DEFAULT 0",
+    ("guild_config", "last_digest_at"): "DATETIME",
 }
 
 
@@ -73,7 +74,12 @@ async def ensure_columns(engine: AsyncEngine) -> list[str]:
     added: list[str] = []
     async with engine.begin() as conn:
         for (table, column), ddl in ADDED_COLUMNS.items():
-            rows = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
+            rows = list(await conn.exec_driver_sql(f"PRAGMA table_info({table})"))
+            # Aucune ligne = la table n'existe pas encore. Une table sans
+            # colonne n'existe pas en SQLite, donc le cas n'est pas ambigu :
+            # create_all la creera, il n'y a rien a modifier ici.
+            if not rows:
+                continue
             if column in {row[1] for row in rows}:
                 continue
             await conn.exec_driver_sql(
