@@ -161,6 +161,34 @@ journalctl -u lolbet -f
 No inbound ports are needed: the bot dials out to Discord over a websocket.
 Leave the security list closed except for SSH.
 
+### Rotating the Riot key
+
+Riot encrypts its identifiers with a key unique to each project, so **a PUUID
+obtained with one API key cannot be decrypted with another**. Swap the key and
+every PUUID already in the database goes stale: SPECTATOR-V5 starts answering
+`400 Bad Request - Exception decrypting ...` on each one, forever, and the bot
+silently stops noticing games.
+
+What is *not* encrypted is the Riot ID, so the fix is to re-resolve every
+PUUID from `Pseudo#TAG` and rewrite it everywhere it is stored:
+
+```bash
+sudo sed -i 's|^LOLBET_RIOT_API_KEY=.*|LOLBET_RIOT_API_KEY=RGAPI-your-new-key|' /opt/lolbet/.env
+sudo systemctl stop lolbet
+
+# Reports what would change, writes nothing.
+sudo -u lolbet bash -c 'cd /opt/lolbet && .venv/bin/python scripts/refresh_puuids.py'
+# Same again with --apply once the report looks right.
+sudo -u lolbet bash -c 'cd /opt/lolbet && .venv/bin/python scripts/refresh_puuids.py --apply'
+
+sudo systemctl start lolbet
+```
+
+The script updates all five tables that carry a PUUID, so history stays
+attached to its player, and purges the cached ACCOUNT-V1 entries — a seven-day
+cached lookup would otherwise hand back the very identifier being replaced.
+Match results are immutable and are kept.
+
 ### Windows, on a machine you already have
 
 No account, no card, nothing to create. A scheduled task starts the bot at
@@ -572,6 +600,8 @@ src/lolbet/
     enrichment.py      spectator payload → embed model
     messages.py        debounced message edits
   cogs/                slash commands
+scripts/
+  refresh_puuids.py    re-resolve PUUIDs after a Riot key rotation
 ```
 
 ---
