@@ -228,6 +228,110 @@ async def progression(
     return Progression(first=snapshots[0], last=snapshots[-1], snapshots=snapshots)
 
 
+@dataclass(frozen=True, slots=True)
+class LpSummary:
+    """Écart de LP sur plusieurs fenêtres. None = pas assez de relevés."""
+
+    day: int | None = None
+    week: int | None = None
+    month: int | None = None
+    total: int | None = None
+
+    @property
+    def has_data(self) -> bool:
+        return self.total is not None
+
+
+def _signed(value: int | None) -> str:
+    return f"{value:+d}" if value is not None else "—"
+
+
+def summary_line(summary: LpSummary) -> str:
+    """Une ligne compacte pour le profil."""
+    return (
+        f"Jour {_signed(summary.day)} \N{BULLET} "
+        f"Semaine {_signed(summary.week)} \N{BULLET} "
+        f"Mois {_signed(summary.month)} \N{BULLET} "
+        f"Total {_signed(summary.total)}"
+    )
+
+
+async def lp_delta(
+    session: AsyncSession, puuid: str, *, since, queue: str | None = None
+) -> int | None:
+    """Écart de LP depuis ``since``. None si rien ne permet de le mesurer.
+
+    La référence est le dernier relevé **antérieur** à la fenêtre : c'est
+    lui qui donne le rang qu'avait le joueur au début de la période. À
+    défaut, on se rabat sur le premier relevé de la fenêtre, ce qui
+    sous-estime l'écart mais ne l'invente pas.
+    """
+    latest = await latest_snapshot(session, puuid, queue)
+    if latest is None:
+        return None
+
+    before = select(RankSnapshot).where(
+        RankSnapshot.puuid == puuid, RankSnapshot.captured_at <= since
+    )
+    if queue:
+        before = before.where(RankSnapshot.queue == queue)
+    baseline = (
+        await session.execute(
+            before.order_by(RankSnapshot.captured_at.desc()).limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if baseline is None:
+        inside = select(RankSnapshot).where(
+            RankSnapshot.puuid == puuid, RankSnapshot.captured_at > since
+        )
+        if queue:
+            inside = inside.where(RankSnapshot.queue == queue)
+        baseline = (
+            await session.execute(
+                inside.order_by(RankSnapshot.captured_at.asc()).limit(1)
+            )
+        ).scalar_one_or_none()
+
+    if baseline is None or baseline.id == latest.id:
+        return None
+    return latest.ladder_score - baseline.ladder_score
+
+
+async def lp_summary(session: AsyncSession, puuid: str) -> LpSummary:
+    """Jour, semaine, mois, et depuis le tout premier relevé."""
+    latest = await latest_snapshot(session, puuid)
+    if latest is None:
+        return LpSummary()
+    queue = latest.queue
+    now = utcnow()
+
+    windows = {
+        "day": timedelta(days=1),
+        "week": timedelta(days=7),
+        "month": timedelta(days=30),
+    }
+    values = {
+        name: await lp_delta(session, puuid, since=now - span, queue=queue)
+        for name, span in windows.items()
+    }
+
+    first = (
+        await session.execute(
+            select(RankSnapshot)
+            .where(RankSnapshot.puuid == puuid, RankSnapshot.queue == queue)
+            .order_by(RankSnapshot.captured_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    total = (
+        latest.ladder_score - first.ladder_score
+        if first is not None and first.id != latest.id
+        else None
+    )
+    return LpSummary(total=total, **values)
+
+
 def sparkline(snapshots: list[RankSnapshot], width: int = 12) -> str:
     """Petit graphe en blocs des derniers relevés."""
     blocks = "▁▂▃▄▅▆▇█"

@@ -185,6 +185,25 @@ def match_duration_seconds(info: dict) -> int:
     return duration
 
 
+REMAKE_MAX_SECONDS = 300
+
+
+def is_remake(match: dict) -> bool:
+    """Une partie abandonnee avant le debut reel.
+
+    Riot designe quand meme une equipe gagnante sur un remake, donc sans
+    ce test les paris seraient regles sur une partie de trois minutes que
+    personne n'a jouee.
+    """
+    info = match.get("info") or {}
+    participants = info.get("participants") or []
+    if any(p.get("gameEndedInEarlySurrender") for p in participants):
+        return True
+    # Filet de securite : le champ ci-dessus manque sur les vieux matchs.
+    duration = match_duration_seconds(info)
+    return bool(participants) and 0 < duration < REMAKE_MAX_SECONDS
+
+
 def _riot_id(participant: dict) -> str:
     name = participant.get("riotIdGameName") or participant.get("summonerName") or "Unknown"
     tag = participant.get("riotIdTagline") or participant.get("riotIdTagLine") or ""

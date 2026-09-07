@@ -16,6 +16,7 @@ from ..config import VALID_PLATFORMS
 from ..logging_conf import get_logger
 from ..riot.client import RiotAPIError, RiotUnauthorized
 from ..riot.rank import UNRANKED_LABEL, solo_queue_rank
+from ..services.progression import lp_summary, summary_line
 from ..services.registration import (
     LinkResult,
     RegistrationError,
@@ -277,6 +278,19 @@ class Registration(commands.Cog):
         if icon is not None:
             embed.set_thumbnail(url=self.bot.ddragon.profile_icon_url(int(icon)))
         embed.add_field(name="Solo/duo", value=rank_line, inline=False)
+
+        async with self.bot.session_factory() as session:
+            summary = await lp_summary(session, player.puuid)
+        embed.add_field(
+            name="LP suivis",
+            value=(
+                summary_line(summary)
+                if summary.has_data
+                else "Pas encore assez de relevés : il en faut deux, pris à la "
+                "fin de deux parties suivies."
+            ),
+            inline=False,
+        )
         embed.add_field(name="Solde", value=f"{format_coins(wallet.balance)} pièces")
         embed.add_field(
             name="Bilan des paris",

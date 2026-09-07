@@ -578,6 +578,25 @@ def build_lock_embed(
     return embed
 
 
+def build_remake_embed(riot_game_id: str, refunded: Settlement | None) -> discord.Embed:
+    """Partie abandonnee : personne n'a joue, personne ne gagne."""
+    embed = discord.Embed(
+        title="\N{ANTICLOCKWISE DOWNWARDS AND UPWARDS OPEN CIRCLE ARROWS} Remake",
+        colour=COLOUR_VOID,
+        description=(
+            "La partie a été abandonnée avant d'avoir commencé. "
+            "Toutes les mises sont rendues."
+        ),
+    )
+    if refunded is not None and refunded.pool.count:
+        embed.add_field(
+            name="Remboursé",
+            value=f"{refunded.pool.total:,} pièces sur {refunded.pool.count} paris",
+        )
+    embed.set_footer(text=f"{riot_game_id} • aucune statistique enregistrée")
+    return embed
+
+
 def build_void_embed(riot_game_id: str, refunded: Settlement | None) -> discord.Embed:
     embed = discord.Embed(
         title="\N{WARNING SIGN} Partie impossible à résoudre",

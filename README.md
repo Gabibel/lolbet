@@ -33,6 +33,10 @@ real-money path anywhere in the code and nothing to add one to.
    recap is posted as a reply to the announcement: KDA, CS/min, damage, gold,
    vision, payouts, plus MVP and worst-player awards from
    [`scoring.py`](src/lolbet/services/scoring.py).
+   A **remake** never gets that far. Riot still names a winning team on an
+   abandoned game, so settling on it would pay out on three minutes nobody
+   played: `is_remake()` catches it, every stake is refunded, and no
+   statistic or rank snapshot is written.
 6. **Roast** — the recap is introduced by a line picked from
    [`taunts.py`](src/lolbet/services/taunts.py) based on how the tracked
    players actually did *and on their history*, and the game LVP gets sent
@@ -47,7 +51,7 @@ real-money path anywhere in the code and nothing to add one to.
 | Command | Who | What |
 | --- | --- | --- |
 | `/inscription <RiotID#TAG> [region]` | anyone | Link your account |
-| `/profil [user]` | anyone | Riot ID, rank, balance, betting record |
+| `/profil [user]` | anyone | Riot ID, rank, LP over day/week/month/total, balance, betting record |
 | `/classement` | anyone | Richest bettors in this server |
 | `/solde [user]` | anyone | Coin balance |
 | `/quotidien` | anyone | +100 coins every 24h |
@@ -350,6 +354,14 @@ new row is written, so the current game is never counted twice.
 Rank snapshots are taken after each game, forcing a fresh LEAGUE-V4 read: the
 cached value is up to six hours old and would still report the rank from
 before the game. A snapshot is only stored when the rank actually moved.
+
+`/profil` sums those snapshots into LP over the day, the week, the month and
+since tracking began. Each window starts from the last snapshot *before* it,
+which is the rank the player held when the window opened. When no such
+snapshot exists the first one inside the window is used instead — that
+understates the swing, but it does not invent one. A window that cannot be
+measured at all prints a dash, never a zero: `+0 LP` is a claim, and an
+unmeasured window is not one we can make.
 
 A season opens on first use. `/cloturer-saison` freezes the standings into an
 archive, resets every balance to the starting amount, and immediately opens

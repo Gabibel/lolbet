@@ -47,6 +47,7 @@ from .embeds import (
     TEAM_NAMES,
     build_game_embed,
     build_lock_embed,
+    build_remake_embed,
     build_result_embed,
     build_bad_key_embed,
     build_void_embed,
@@ -54,7 +55,7 @@ from .embeds import (
     side_labels_for,
 )
 from .enrichment import base_card, find_team_id
-from .scoring import score_match
+from .scoring import is_remake, score_match
 from .taunts import build_taunt_content
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -659,6 +660,12 @@ class GameTracker:
             await self._schedule_retry(game_id)
             return
 
+        # Un remake n'est pas un resultat : Riot designe pourtant une
+        # equipe gagnante, donc il faut le detecter avant de regler.
+        if is_remake(match):
+            await self._settle_remake(game_id)
+            return
+
         scores = score_match(match)
         winning_team = scores.winning_team_id
 
@@ -729,6 +736,30 @@ class GameTracker:
             won=winning_team == snapshot[2],
             payouts=settlement.total_paid,
         )
+
+    async def _settle_remake(self, game_id: int) -> None:
+        """Rembourse tout le monde et n'enregistre aucune statistique."""
+        bot = self._bot
+        async with bot.session_factory() as session:
+            game = await session.get(TrackedGame, game_id)
+            if game is None or game.status != GameStatus.PENDING_RESULT:
+                return
+            settlement = await bot.betting.refund_all(session, game)
+            game.status = GameStatus.VOID
+            game.resolved_at = utcnow()
+            session.add(game)
+            await session.commit()
+            riot_game_id = game.riot_game_id
+
+        log.info(
+            "tracker.remake",
+            game=riot_game_id,
+            refunded=settlement.pool.total,
+        )
+        await self._post_followup(
+            game_id, build_remake_embed(riot_game_id, settlement)
+        )
+        await bot.updater.refresh(game_id)
 
     async def _schedule_retry(self, game_id: int) -> None:
         bot = self._bot
