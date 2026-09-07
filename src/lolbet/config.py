@@ -102,6 +102,18 @@ class Settings(BaseSettings):
     alert_bad_key: bool = True
     alert_cooldown_hours: int = Field(default=6, ge=1)
 
+    # Overwatch : suivi de rang uniquement.
+    #
+    # Blizzard n'a pas d'API Overwatch. OverFast lit la page de carriere
+    # publique et la sert en JSON ; c'est gratuit et auto-hebergeable, donc
+    # compatible avec la contrainte du projet. Pointer overfast_base_url sur
+    # une instance locale si l'instance publique devenait indisponible.
+    overwatch_enabled: bool = True
+    overfast_base_url: str = "https://overfast-api.tekrop.fr"
+    # Le rang ne bouge que toutes les 5 victoires ou 15 defaites, et le profil
+    # public se rafraichit lentement : relire plus souvent ne donnerait rien.
+    overwatch_poll_seconds: int = Field(default=900, ge=120)
+
     # Logging
     log_level: str = "INFO"
     log_json: bool = False

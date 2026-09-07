@@ -284,3 +284,59 @@ class SeasonStanding(SQLModel, table=True):
     net_profit: int = 0
     total_wagered: int = 0
     riot_id: str = ""
+
+
+class OverwatchPlayer(SQLModel, table=True):
+    """Un compte Overwatch suivi, lié à un membre du serveur.
+
+    Table séparée de ``Player`` : rien n'oblige quelqu'un à jouer aux deux
+    jeux, et les identifiants n'ont aucun rapport (PUUID contre BattleTag).
+    """
+
+    __tablename__ = "overwatch_player"
+    __table_args__ = (
+        UniqueConstraint("guild_id", "discord_id", name="uq_ow_player_guild_user"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    guild_id: int = Field(sa_column=Column(BigInteger, nullable=False, index=True))
+    discord_id: int = Field(sa_column=Column(BigInteger, nullable=False))
+    # Toujours stocké sous la forme « Pseudo#1234 ».
+    battletag: str = Field(max_length=64, index=True)
+    platform: str = Field(default="pc", max_length=8)
+    username: str = Field(default="", max_length=64)
+    avatar_url: str = Field(default="", max_length=300)
+
+    registered_at: datetime = Field(default_factory=utcnow)
+    last_checked_at: datetime | None = None
+    # Dernière raison d'échec de lecture, pour que /ow-statut puisse
+    # l'expliquer au lieu de rester muet.
+    last_error: str = Field(default="", max_length=200)
+
+
+class OverwatchRankSnapshot(SQLModel, table=True):
+    """Le rang d'un rôle à un instant donné.
+
+    Écrit seulement quand le rang a changé : Overwatch ne réévalue que toutes
+    les 5 victoires ou 15 défaites, donc une ligne par relevé serait presque
+    toujours un doublon.
+    """
+
+    __tablename__ = "overwatch_rank_snapshot"
+    __table_args__ = (
+        Index("ix_ow_rank_tag_time", "battletag", "captured_at"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    battletag: str = Field(max_length=64)
+    platform: str = Field(default="pc", max_length=8)
+    role: str = Field(max_length=16)
+
+    division: str = Field(max_length=16)
+    tier: int = 5
+    # Position sur l'échelle continue : c'est elle qui rend deux relevés
+    # comparables entre divisions.
+    ladder_score: int = 0
+    season: int | None = None
+
+    captured_at: datetime = Field(default_factory=utcnow, index=True)

@@ -119,3 +119,33 @@ async def test_every_declared_column_exists_on_a_fresh_database(tmp_path, table,
         await engine.dispose()
 
     assert column in columns_of(path, table)
+
+
+def tables_of(path) -> set[str]:
+    connection = sqlite3.connect(path)
+    try:
+        return {
+            row[0]
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    finally:
+        connection.close()
+
+
+async def test_the_overwatch_tables_appear_on_an_existing_database(tmp_path):
+    """Une base deja en service doit recevoir les nouvelles tables au demarrage."""
+    path = tmp_path / "lolbet.db"
+    make_old_database(path)
+    assert "overwatch_player" not in tables_of(path)
+
+    engine = create_engine(f"sqlite+aiosqlite:///{path.as_posix()}")
+    try:
+        await init_db(engine)
+    finally:
+        await engine.dispose()
+
+    present = tables_of(path)
+    assert "overwatch_player" in present
+    assert "overwatch_rank_snapshot" in present
+    # Et les donnees d'avant sont intactes.
+    assert columns_of(path, "bet") >= {"id", "amount", "odds"}

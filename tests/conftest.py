@@ -5,6 +5,7 @@ import pytest
 from lolbet.config import Settings
 from lolbet.db import create_engine, create_session_factory, init_db
 from lolbet.riot.cache import TTLCache
+from lolbet.overwatch.client import OverFastClient
 from lolbet.riot.client import RiotClient
 from lolbet.riot.ratelimit import RateLimiter
 from lolbet.services.betting import BettingService
@@ -66,6 +67,11 @@ def fast_limiter() -> RateLimiter:
 @pytest.fixture
 def riot(settings, cache, fast_limiter) -> RiotClient:
     return RiotClient(settings, cache, fast_limiter)
+
+
+@pytest.fixture
+def overfast(settings, cache, fast_limiter) -> OverFastClient:
+    return OverFastClient(settings, cache, limiter=fast_limiter)
 
 
 @pytest.fixture

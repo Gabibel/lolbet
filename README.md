@@ -67,6 +67,11 @@ real-money path anywhere in the code and nothing to add one to.
 | `/desinscrire-joueur <member>` | Manage Server | Stop tracking someone else - the only way out, on purpose |
 | `/salon [channel]` | Manage Server | Where games are announced |
 | `/statut` | Manage Server | Rate-limit, cache and tracker diagnostics |
+| `/ow-inscription <BattleTag>` | anyone | Link an Overwatch account (rank tracking only) |
+| `/ow-profil [member]` | anyone | Overwatch rank per role, peak, last move |
+| `/ow-inscrits` | anyone | Every Overwatch account tracked here |
+| `/ow-inscrire-joueur <member> <BattleTag>` | Manage Server | Link someone else's account |
+| `/ow-desinscrire-joueur <member>` | Manage Server | Stop tracking someone else |
 
 Betting itself happens on the buttons attached to each announcement.
 
@@ -363,6 +368,38 @@ understates the swing, but it does not invent one. A window that cannot be
 measured at all prints a dash, never a zero: `+0 LP` is a claim, and an
 unmeasured window is not one we can make.
 
+### Overwatch: rank tracking, and why there is nothing more
+
+Blizzard has never published an Overwatch API. Their developer platform covers
+WoW, Diablo, Hearthstone and StarCraft, and that has not changed. Two things
+therefore do not exist, for this bot or for anyone else:
+
+* **no live-game detection.** There is no equivalent of SPECTATOR-V5, so there
+  is nothing to open a betting market on. That is why `/ow-*` has no betting
+  commands — it is a missing data source, not a missing feature.
+* **no per-match history.** The public career profile only carries running
+  totals, so there is no match to score, no MVP to award and no KDA to mock.
+
+What the career profile does carry is the competitive rank per role, and that
+is what the bot tracks. [OverFast](https://github.com/TeKrop/overfast-api)
+reads that page and serves it as JSON; it is open source and self-hostable
+with Docker, so pointing `LOLBET_OVERFAST_BASE_URL` at your own container
+keeps the whole thing free and dependency-free. The profile must be public:
+Options → Social → Career Profile.
+
+Two consequences worth knowing before reading the output:
+
+* Overwatch only re-evaluates a rank every **5 wins or 15 losses**, so the
+  history moves in steps, not per game. A quiet week is normal.
+* A rank is a division and a tier (5 is the bottom of a division, 1 the top),
+  and nothing else. There is no SR to show, so the bot reports movement in
+  *steps* — one tier, or five for a division — and never a made-up number.
+
+The first reading of an account is recorded but never announced: at that
+moment the bot is discovering the rank, not watching it move. Announcing a
+promotion there would be false. After that, every change is posted to the
+same channel as the League announcements, with its own banter file.
+
 A season opens on first use. `/cloturer-saison` freezes the standings into an
 archive, resets every balance to the starting amount, and immediately opens
 the next one so betting is never blocked. **Balances reset, history does
@@ -450,6 +487,9 @@ knowing:
 | `LOLBET_BACKUP_ENABLED` | `true` | Daily SQLite snapshot into `data/backups/` |
 | `LOLBET_BACKUP_KEEP` | `7` | How many daily snapshots to keep |
 | `LOLBET_ALERT_BAD_KEY` | `true` | Post in Discord when the Riot key is refused |
+| `LOLBET_OVERWATCH_ENABLED` | `true` | Overwatch rank tracking |
+| `LOLBET_OVERFAST_BASE_URL` | public instance | Point it at your own OverFast container to depend on nobody |
+| `LOLBET_OVERWATCH_POLL_SECONDS` | `900` | How often career profiles are re-read |
 | `LOLBET_DEV_GUILD_ID` | unset | Set it for instant slash-command sync while developing |
 
 ---
@@ -471,7 +511,10 @@ a Riot key.
 
 All ~430 lines live in [`taunt_lines.py`](src/lolbet/services/taunt_lines.py),
 which contains no logic at all - edit, add or delete freely. The selection
-rules are in `taunts.py` and read the file by category key.
+rules are in `taunts.py` and read the file by category key. The Overwatch
+lines are in a separate file,
+[`ow_taunt_lines.py`](src/lolbet/services/ow_taunt_lines.py), because they can
+only talk about the rank: the game publishes no per-match stats to mock.
 
 The rule that shapes everything: **the most specific situation wins**. Someone
 who breaks their personal death record during a fifth straight defeat gets the
@@ -509,6 +552,9 @@ src/lolbet/
     client.py          PUUID-only endpoints
     ddragon.py         static data (no key, no limit)
     rank.py            tier/LP ladder maths
+  overwatch/
+    client.py          OverFast reads, cached and rate-limited
+    rank.py            division/tier ladder maths
   services/
     tracker.py         poll + maintenance loops
     betting.py         parimutuel pool + wallets
@@ -518,7 +564,11 @@ src/lolbet/
     progression.py     rank snapshots and LP movement
     seasons.py         season lifecycle and frozen standings
     backup.py          daily SQLite snapshots
+    overwatch.py       Overwatch rank snapshots and what moved
+    ow_tracker.py      the slow Overwatch poll loop
+    ow_taunts.py       rank-change banter
     embeds.py          all Discord rendering
+    ow_embeds.py       Overwatch rendering
     enrichment.py      spectator payload → embed model
     messages.py        debounced message edits
   cogs/                slash commands
@@ -533,6 +583,7 @@ src/lolbet/
 | Hosting | Oracle Cloud Always Free ARM VM, or a Pi you own | $0, no expiry |
 | Database | SQLite on local disk, WAL mode | $0, no server |
 | Riot API | Personal key | $0, permanent |
+| Overwatch data | OverFast, open source, self-hostable | $0, no key |
 | Static assets | Data Dragon CDN | $0, no key, no quota |
 | Discord | Bot API | $0 |
 | Scheduling | Plain asyncio loops in-process | $0, no worker service |
