@@ -19,9 +19,17 @@ import random
 from .history import PlayerForm
 from .progression import RankChange
 from .scoring import PlayerScore
-from .taunt_lines import JABS, LVP_LINES, MVP_LINES, TAUNTS, total_lines
+from .taunt_lines import (
+    GENERIC_LOSS,
+    JABS,
+    LVP_LINES,
+    MVP_LINES,
+    TAUNTS,
+    total_lines,
+)
 
 __all__ = [
+    "GENERIC_LOSS",
     "JABS",
     "LVP_LINES",
     "MVP_LINES",
@@ -30,6 +38,41 @@ __all__ = [
     "taunt_for",
     "total_lines",
 ]
+
+# Situations de défaite où une moquerie générique est toujours vraie : le
+# tirage y ajoute GENERIC_LOSS aux phrases spécifiques. Les catégories
+# élogieuses en sont exclues, sinon une bonne partie serait félicitée par
+# une insulte.
+LOSS_POOL_CATEGORIES = frozenset(
+    {
+        "worst_lost",
+        "fed_lost",
+        "bad_lost",
+        "streak_lost",
+        "stomp_lost",
+        "long_game_lost",
+        "record_deaths",
+        "repeat_lvp",
+        "lp_crash",
+        "demoted",
+    }
+)
+
+
+# Part du tirage laissée au lot commun. Volontairement minoritaire : le lot
+# compte 257 phrases contre une vingtaine par catégorie, donc un simple
+# tirage uniforme le ferait sortir neuf fois sur dix et une partie de 52
+# minutes ne parlerait presque jamais de sa durée. La phrase spécifique
+# reste la règle, le lot commun apporte la variété.
+GENERIC_SHARE = 0.35
+
+
+def _draw(category: str, rng: random.Random) -> str:
+    """Une phrase de la catégorie, ou du lot commun quand il est éligible."""
+    if category in LOSS_POOL_CATEGORIES and rng.random() < GENERIC_SHARE:
+        return rng.choice(GENERIC_LOSS)
+    return rng.choice(TAUNTS[category])
+
 
 # Seuils qui décident de la catégorie.
 DEATHS_FED = 10
@@ -139,6 +182,9 @@ def _fields(
     if form is not None:
         streak = (form.winning_streak if score.win else form.losing_streak) + 1
     return {
+        # Le pseudo sans le tag : la mention Discord ouvre déjà la ligne,
+        # ce champ ne sert qu'aux phrases qui citent le joueur au milieu.
+        "player": score.riot_id.split("#")[0],
         "deaths": score.deaths,
         "kills": score.kills,
         "assists": score.assists,
@@ -203,7 +249,7 @@ def taunt_for(
         rank_change=rank_change,
     )
     fields = _fields(score, duration_seconds, form, rank_change)
-    line = rng.choice(TAUNTS[category]).format(**fields)
+    line = _draw(category, rng).format(**fields)
 
     # On n'enfonce que ceux qui le méritent : jamais un MVP, jamais une
     # bonne partie.

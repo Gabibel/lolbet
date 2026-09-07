@@ -537,9 +537,25 @@ a Riot key.
 
 ### Editing the banter
 
-All ~430 lines live in [`taunt_lines.py`](src/lolbet/services/taunt_lines.py),
+All ~795 lines live in [`taunt_lines.py`](src/lolbet/services/taunt_lines.py),
 which contains no logic at all - edit, add or delete freely. The selection
-rules are in `taunts.py` and read the file by category key. The Overwatch
+rules are in `taunts.py` and read the file by category key.
+
+About 256 of those came from an imported batch of "20,000" ragebait lines that
+turned out to hold only 310 distinct sentences — the same line re-rolled with
+random numbers, a random prefix and a random emoji. The random numbers were the
+problem: `241 CS` shown to someone who farmed 48 is a lie nobody would catch.
+Every number was either mapped to the field that actually holds it (`{cs}`,
+`{deaths}`, `{kills}/{deaths}/{assists}`, `{minutes}`, `{streak}`) or the
+sentence was dropped, which is what happened to the 746 lines citing objectives,
+wards and percentages the bot does not measure.
+
+The batch is pure mockery, so it lands in `GENERIC_LOSS` and is only ever drawn
+for losing situations — praising a good game with an insult is the one failure
+mode worth engineering against. It is also deliberately a minority of the draw
+(`GENERIC_SHARE`, 35%): the pool is 256 lines against roughly twenty per
+category, so an even draw would mean a 52-minute game almost never mentioned
+its own length. The Overwatch
 lines are in a separate file,
 [`ow_taunt_lines.py`](src/lolbet/services/ow_taunt_lines.py), because they can
 only talk about the rank: the game publishes no per-match stats to mock.

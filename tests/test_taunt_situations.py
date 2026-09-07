@@ -12,7 +12,7 @@ from lolbet.models import RankSnapshot
 from lolbet.services.history import PlayerForm
 from lolbet.services.progression import RankChange
 from lolbet.services.scoring import PlayerScore
-from lolbet.services.taunt_lines import TAUNTS, total_lines
+from lolbet.services.taunt_lines import GENERIC_LOSS, TAUNTS, total_lines
 from lolbet.services.taunts import _category, taunt_for
 
 VETERAN = PlayerForm(games=20, wins=10, losses=10, streak=1, worst_deaths=8, best_kills=9)
@@ -101,9 +101,10 @@ def test_every_line_uses_only_known_fields():
         "vision",
         "damage",
         "lp",
+        "player",
     }
     sample = dict.fromkeys(known, 1)
-    for name, lines in TAUNTS.items():
+    for name, lines in list(TAUNTS.items()) + [("GENERIC_LOSS", GENERIC_LOSS)]:
         for line in lines:
             try:
                 line.format(**sample)
@@ -224,10 +225,24 @@ def test_without_history_no_category_needs_it():
 
 
 def test_the_minutes_are_injected_in_length_lines():
-    line = taunt_for(
-        score(win=False), is_mvp=False, is_worst=False, duration_seconds=52 * 60, form=VETERAN
-    )
-    assert "52" in line
+    """Une partie longue parle de sa durée la plupart du temps.
+
+    Le lot commun est éligible ici, donc pas systématiquement : ce qui est
+    vérifié, c'est que la phrase spécifique reste majoritaire. Sans cela, les
+    257 phrases génériques noieraient les 18 phrases de durée.
+    """
+    lines = [
+        taunt_for(
+            score(win=False),
+            is_mvp=False,
+            is_worst=False,
+            duration_seconds=52 * 60,
+            form=VETERAN,
+            seed=str(seed),
+        )
+        for seed in range(40)
+    ]
+    assert sum("52" in line for line in lines) >= 20
 
 
 def test_every_category_renders_without_leftovers():
