@@ -99,6 +99,9 @@ class GameTracker:
         self._tasks: list[asyncio.Task[None]] = []
         self._stopping = asyncio.Event()
         self._last_cache_purge = utcnow()
+        # Parties deja signalees comme hors liste, pour ne pas logguer a
+        # chaque passage du sondage.
+        self._skipped_games: set[str] = set()
         self._last_backup = utcnow() - timedelta(days=1)
         self._last_key_alert: datetime | None = None
         # De quoi répondre à « est-ce que le bot surveille vraiment ? »
@@ -282,6 +285,20 @@ class GameTracker:
         self, spectator: dict[str, Any], platform: str, riot_game_id: str
     ) -> None:
         """Announce this game in every guild that has not seen it yet."""
+        queue_id = int(spectator.get("gameQueueConfigId") or 0)
+        if queue_id not in self._bot.settings.tracked_queues:
+            # Une file qu'on ne saurait pas regler : pas de marche, pas de
+            # remboursement a repetition. Loggue une fois par partie.
+            if riot_game_id not in self._skipped_games:
+                self._skipped_games.add(riot_game_id)
+                log.info(
+                    "tracker.queue_skipped",
+                    game=riot_game_id,
+                    queue=queue_id,
+                    hint="ajoute la file a LOLBET_TRACKED_QUEUES si Riot la sert",
+                )
+            return
+
         puuids = {
             str(p.get("puuid") or "") for p in (spectator.get("participants") or [])
         } - {""}

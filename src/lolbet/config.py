@@ -52,6 +52,17 @@ class Settings(BaseSettings):
     # Storage - SQLite on local disk, nothing else. WAL is enabled in db.py.
     database_url: str = "sqlite+aiosqlite:///./data/lolbet.db"
 
+    # Files de jeu sur lesquelles le bot ouvre des paris. Tout le reste est
+    # ignore : les modes tournants recents ne sont pas servis par MATCH-V5
+    # (ARAM Mayhem repond 403), l'Arene a quatre equipes que le scoring ne
+    # sait pas juger, la Nuee est du PvE. Ouvrir un marche qu'on sait ne
+    # jamais pouvoir regler ne ferait que des remboursements.
+    # 400 draft, 420 solo/duo, 430 aveugle, 440 flex, 450 ARAM,
+    # 480 partie rapide, 490 ancienne partie rapide, 700 Clash, 720 Clash ARAM.
+    tracked_queues: set[int] = Field(
+        default_factory=lambda: {400, 420, 430, 440, 450, 480, 490, 700, 720}
+    )
+
     # Polling
     poll_interval_seconds: int = Field(default=60, ge=10)
     enrich_delay_seconds: float = Field(default=3.0, ge=0)

@@ -173,3 +173,66 @@ async def test_a_transient_error_keeps_the_generic_reason(
         await tracker._resolve_pending()
 
     assert voided == [(game_id, "api_error")]
+
+
+# -- files ignorees ----------------------------------------------------------
+
+
+async def _tracker_with_player(session_factory, settings, monkeypatch):
+    from lolbet.models import Player
+
+    async with session_factory() as session:
+        session.add(
+            Player(
+                guild_id=GUILD,
+                discord_id=11,
+                puuid="p-mayhem",
+                game_name="Joueur",
+                tag_line="EUW",
+                platform="euw1",
+            )
+        )
+        await session.commit()
+
+    tracker = GameTracker(make_bot(session_factory, settings, FakeRiot(RuntimeError())))
+    announced: list[str] = []
+
+    async def fake_announce(guild_id, players, spectator, platform, riot_game_id):
+        announced.append(riot_game_id)
+
+    monkeypatch.setattr(tracker, "_announce_for_guild", fake_announce)
+    return tracker, announced
+
+
+def spectator(queue: int) -> dict:
+    return {"gameQueueConfigId": queue, "participants": [{"puuid": "p-mayhem"}]}
+
+
+async def test_a_queue_riot_will_not_serve_is_never_announced(
+    session_factory, settings, monkeypatch
+):
+    """ARAM Mayhem (2400) : pas de marche qu'on sait ne jamais pouvoir regler."""
+    tracker, announced = await _tracker_with_player(session_factory, settings, monkeypatch)
+    await tracker._on_live_game(spectator(2400), "euw1", "EUW1_1")
+    assert announced == []
+
+
+async def test_a_ranked_queue_is_still_announced(session_factory, settings, monkeypatch):
+    tracker, announced = await _tracker_with_player(session_factory, settings, monkeypatch)
+    await tracker._on_live_game(spectator(420), "euw1", "EUW1_2")
+    assert announced == ["EUW1_2"]
+
+
+async def test_the_allow_list_is_configurable(session_factory, settings, monkeypatch):
+    """Le jour ou Riot sert le mode, une ligne de .env suffit."""
+    settings.tracked_queues = {2400}
+    tracker, announced = await _tracker_with_player(session_factory, settings, monkeypatch)
+    await tracker._on_live_game(spectator(2400), "euw1", "EUW1_3")
+    await tracker._on_live_game(spectator(420), "euw1", "EUW1_4")
+    assert announced == ["EUW1_3"]
+
+
+def test_the_default_list_covers_the_modes_the_bot_can_settle(settings):
+    assert {420, 440, 400, 450} <= settings.tracked_queues
+    assert 2400 not in settings.tracked_queues  # Mayhem : 403 en MATCH-V5
+    assert 1700 not in settings.tracked_queues  # Arene : quatre equipes

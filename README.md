@@ -455,6 +455,12 @@ message that says *why* — "Riot refuses to serve this mode" reads differently
 from "the match never appeared". Before this, an API error skipped the
 countdown entirely and was retried every ten seconds forever, silently.
 
+Since a market that can never be settled only ever ends in a refund, the bot
+now opens one only on queues it knows it can settle — `LOLBET_TRACKED_QUEUES`,
+defaulting to the Summoner's Rift and ARAM queues plus Clash. Anything else
+is logged once as `tracker.queue_skipped` and left alone. Add a queue there
+the day Riot starts serving it.
+
 ### Winners get mocked too, and some games get a GIF
 
 A clean win used to earn a compliment. It now draws, 60% of the time, from a
@@ -596,6 +602,7 @@ knowing:
 | `LOLBET_BACKUP_ENABLED` | `true` | Daily SQLite snapshot into `data/backups/` |
 | `LOLBET_BACKUP_KEEP` | `7` | How many daily snapshots to keep |
 | `LOLBET_ALERT_BAD_KEY` | `true` | Post in Discord when the Riot key is refused |
+| `LOLBET_TRACKED_QUEUES` | SR + ARAM + Clash | Queues the bot opens a market on; JSON list |
 | `LOLBET_GIFS_ENABLED` | `true` | GIF under the recap on notable situations |
 | `LOLBET_TENOR_API_KEY` | unset | Free Google key; adds Tenor search to the curated list |
 | `LOLBET_DIGEST_ENABLED` | `true` | Weekly round-up |
