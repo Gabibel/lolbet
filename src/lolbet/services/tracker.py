@@ -83,6 +83,15 @@ class PollTarget:
         return bool(self.game_ids)
 
 
+def _void_reason(exc: RiotAPIError) -> str:
+    """Le mot-cle qui choisira le message d'abandon."""
+    if exc.status == 403:
+        return "forbidden"
+    if exc.status in (401,):
+        return "bad_key"
+    return "api_error"
+
+
 class GameTracker:
     def __init__(self, bot: LoLBet) -> None:
         self._bot = bot
@@ -643,7 +652,19 @@ class GameTracker:
             try:
                 await self._resolve_game(int(game.id or 0))
             except RiotAPIError as exc:
-                log.warning("tracker.resolve_api_error", game=game.riot_game_id, error=str(exc))
+                # Sans ceci, une erreur API (403 sur un mode que Riot ne
+                # sert pas, cle expiree, 5xx) etait retentee toutes les dix
+                # secondes pour toujours, sans message ni remboursement.
+                # Une partie a ete vue boucler six heures sur un 403.
+                log.warning(
+                    "tracker.resolve_api_error",
+                    game=game.riot_game_id,
+                    error=str(exc),
+                    attempt=game.result_attempts + 1,
+                )
+                await self._schedule_retry(
+                    int(game.id or 0), reason=_void_reason(exc)
+                )
             except Exception as exc:  # pragma: no cover - defensive
                 log.exception("tracker.resolve_failed", game=game.riot_game_id, error=str(exc))
 
@@ -767,7 +788,13 @@ class GameTracker:
         )
         await bot.updater.refresh(game_id)
 
-    async def _schedule_retry(self, game_id: int) -> None:
+    async def _schedule_retry(self, game_id: int, *, reason: str = "") -> None:
+        """Repousse la prochaine tentative, ou abandonne apres la derniere.
+
+        ``reason`` est ce qui sera dit aux parieurs si on abandonne : un
+        match jamais publie et un match que Riot refuse de servir ne se
+        racontent pas pareil.
+        """
         bot = self._bot
         now = utcnow()
         give_up = False
@@ -793,9 +820,9 @@ class GameTracker:
             await session.commit()
 
         if give_up:
-            await self._void_game(game_id)
+            await self._void_game(game_id, reason=reason)
 
-    async def _void_game(self, game_id: int) -> None:
+    async def _void_game(self, game_id: int, *, reason: str = "") -> None:
         bot = self._bot
         async with bot.session_factory() as session:
             game = await session.get(TrackedGame, game_id)
@@ -809,8 +836,15 @@ class GameTracker:
             await session.commit()
             riot_game_id = game.riot_game_id
 
-        log.warning("tracker.voided", game=riot_game_id, refunded=settlement.pool.total)
-        await self._post_followup(game_id, build_void_embed(riot_game_id, settlement))
+        log.warning(
+            "tracker.voided",
+            game=riot_game_id,
+            refunded=settlement.pool.total,
+            reason=reason or "not_published",
+        )
+        await self._post_followup(
+            game_id, build_void_embed(riot_game_id, settlement, reason=reason)
+        )
         await bot.updater.refresh(game_id)
 
     async def _post_followup(

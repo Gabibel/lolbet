@@ -443,6 +443,18 @@ is a risk with no upside. A remake refunds them alongside everything else, and
 a target missing from the match payload is refunded rather than judged on data
 that is not there.
 
+### When Riot will not serve a match
+
+MATCH-V5 does not cover every queue. Brand-new rotating modes — ARAM: Mayhem
+(queue 2400) was the first one seen — come back as `403 Forbidden` from
+MATCH-V5 while the same key works everywhere else, and no amount of retrying
+changes that. The tracker treats any API error during resolution like a
+match that has not been published yet: exponential backoff, twelve attempts
+(about 45 minutes), then the game is voided and every bet refunded, with a
+message that says *why* — "Riot refuses to serve this mode" reads differently
+from "the match never appeared". Before this, an API error skipped the
+countdown entirely and was retried every ten seconds forever, silently.
+
 ### Overwatch: rank tracking, and why there is nothing more
 
 Blizzard has never published an Overwatch API. Their developer platform covers

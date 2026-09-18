@@ -50,8 +50,16 @@ QUEUE_NAMES: dict[int, str] = {
     900: "URF",
     1020: "Un pour tous",
     1300: "Nexus Blitz",
+    480: "Partie rapide",
     1700: "Arène",
+    1710: "Arène",
+    1810: "Nuée",
+    1820: "Nuée",
+    1830: "Nuée",
+    1840: "Nuée",
     1900: "URF",
+    2300: "Baston",
+    2400: "ARAM : Mayhem",
 }
 
 TEAM_NAMES = {BLUE_TEAM: "Équipe Bleue", RED_TEAM: "Équipe Rouge"}
@@ -597,14 +605,36 @@ def build_remake_embed(riot_game_id: str, refunded: Settlement | None) -> discor
     return embed
 
 
-def build_void_embed(riot_game_id: str, refunded: Settlement | None) -> discord.Embed:
+VOID_REASONS: dict[str, str] = {
+    "not_published": (
+        "La partie n'est jamais apparue dans MATCH-V5 (remake, ou Riot ne "
+        "l'a jamais publiée). Tous les paris ont été remboursés."
+    ),
+    # 403 alors que la clé marche ailleurs : Riot ne sert pas ce match. C'est
+    # le cas des modes temporaires récents, pas encore exposés dans MATCH-V5.
+    "forbidden": (
+        "Riot refuse de fournir le détail de cette partie : ce mode de jeu "
+        "n'est pas encore servi par MATCH-V5. Impossible de désigner un "
+        "gagnant, tous les paris ont été remboursés."
+    ),
+    "bad_key": (
+        "La clé API Riot a été refusée pendant toute la fenêtre de "
+        "résolution. Tous les paris ont été remboursés."
+    ),
+    "api_error": (
+        "Riot n'a pas répondu correctement pendant toute la fenêtre de "
+        "résolution. Tous les paris ont été remboursés."
+    ),
+}
+
+
+def build_void_embed(
+    riot_game_id: str, refunded: Settlement | None, *, reason: str = ""
+) -> discord.Embed:
     embed = discord.Embed(
         title="\N{WARNING SIGN} Partie impossible à résoudre",
         colour=COLOUR_VOID,
-        description=(
-            "La partie n'est jamais apparue dans MATCH-V5 (remake, ou Riot ne "
-            "l'a jamais publiée). Tous les paris ont été remboursés."
-        ),
+        description=VOID_REASONS.get(reason, VOID_REASONS["not_published"]),
     )
     if refunded is not None and refunded.pool.count:
         embed.add_field(
