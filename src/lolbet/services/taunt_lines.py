@@ -1011,6 +1011,59 @@ RAGEBAIT_LONG_GAME_LOST = (
 )
 
 
+# =========================================================================
+# VICTOIRES : ON CHAMBRE QUAND MÊME
+# =========================================================================
+#
+# Un gagnant n'est pas à l'abri. Mais ces phrases ne parlent que de la
+# victoire elle-même — sa rareté, sa fragilité, ce qu'elle va coûter à
+# l'ego — jamais des statistiques : elles sortent aussi sur un MVP, et lui
+# reprocher d'avoir été porté serait faux. Le lot est tiré sur toutes les
+# situations de victoire, en plus des phrases spécifiques.
+GENERIC_WIN = (
+    "Gagné. Fais une capture, ça ne se reproduira pas de sitôt.",
+    "Une victoire. Le classement corrigera ça dès ce soir.",
+    "Tu as gagné, et tu vas nous en parler pendant une semaine.",
+    "Bravo. L'équipe d'en face a dû avoir un problème de connexion.",
+    "Victoire. On note la date, pour la prochaine série de défaites.",
+    "Tu as gagné. Ne relance pas, c'est le seul conseil qui vaut.",
+    "Gagné. Profite du moment, il est court.",
+    "Une victoire, et déjà tu te prends pour un smurf.",
+    "Le Nexus adverse est tombé. Personne ne sait vraiment pourquoi.",
+    "Tu as gagné. Statistiquement, ça devait finir par arriver.",
+    "Victoire validée. Ta prochaine game va la venger.",
+    "Gagné. Le matchmaking s'excuse auprès de l'équipe adverse.",
+    "Tu as gagné cette partie. La suivante t'attend avec un couteau.",
+    "Une victoire de plus pour le compteur. Le compteur n'était pas haut.",
+    "Bravo. Même une horloge arrêtée a raison deux fois par jour.",
+    "Gagné. Tes coéquipiers te remercient de ne pas avoir tout gâché.",
+    "Victoire. Ton ego vient de prendre 3 kg, ton rang beaucoup moins.",
+    "Tu as gagné. Riot a déjà lancé une enquête.",
+    "Gagné contre des gens qui ont sûrement lag. C'est ce que tu diras.",
+    "Une victoire. Pas une remise en question, juste une victoire.",
+    "Bravo. Le prochain matchmaking te le fera payer cash.",
+    "Tu as gagné, et le seul étonné dans le lobby, c'est toi.",
+    "Gagné. La partie s'est déroulée comme tu l'expliques à personne.",
+    "Victoire. Le bot a vérifié deux fois, c'est bien la bonne équipe.",
+    "Tu as gagné. Réserve ta joie, le tilt arrive avec la prochaine.",
+    "Gagné. L'équipe adverse a fait ce que tu fais d'habitude.",
+    "Une victoire. Elle compte autant que les défaites, hélas pour toi.",
+    "Bravo. Tu as terminé une game sans que le bot ait à te consoler.",
+    "Tu as gagné. Le message est court parce que c'est rare.",
+    "Gagné. On attend la suite avec l'impatience de ceux qui savent.",
+    "Victoire. Ta série de défaites était juste en pause.",
+    "Tu as gagné. Dis-le vite avant que quelqu'un vérifie le scoreboard.",
+    "Gagné. Le pire, c'est que tu vas croire que c'est toi.",
+    "Une victoire ce soir. Le reste de la semaine reste à écrire.",
+    "Bravo. Tu as gagné contre cinq personnes qui avaient d'autres projets.",
+    "Tu as gagné. Le lobby suivant a été prévenu.",
+    "Gagné. Même tes coéquipiers n'y croyaient pas au chargement.",
+    "Victoire. Le genre qu'on gagne malgré soi.",
+    "Tu as gagné. Les LP sont là, la légitimité un peu moins.",
+    "Gagné. On te laisse dix minutes de fierté, pas une de plus.",
+)
+
+
 # tu peux modifier les phrases, mais pas renommer les clés.
 TAUNTS: dict[str, tuple[str, ...]] = {
     "worst_lost": WORST_LOST + RAGEBAIT_WORST_LOST,
@@ -1048,6 +1101,7 @@ def total_lines() -> int:
     return (
         sum(len(lines) for lines in TAUNTS.values())
         + len(GENERIC_LOSS)
+        + len(GENERIC_WIN)
         + sum(len(lines) for lines in JABS.values())
         + len(LVP_LINES)
         + len(MVP_LINES)

@@ -100,7 +100,14 @@ def test_worst_player_who_won_is_told_he_was_carried():
     line = taunt_for(
         score(deaths=11, win=True), is_mvp=False, is_worst=True, duration_seconds=1800
     )
-    assert any(line.startswith(base.split("{")[0]) for base in TAUNTS["worst_won"])
+    # Depuis que les victoires se font chambrer aussi, la phrase peut venir
+    # du lot commun de victoire ; ce qui compte, c'est qu'aucune ne le felicite.
+    from lolbet.services.taunt_lines import GENERIC_WIN
+
+    assert (
+        any(line.startswith(base.split("{")[0]) for base in TAUNTS["worst_won"])
+        or line in set(GENERIC_WIN)
+    )
 
 
 def test_mvp_is_never_piled_on():
@@ -111,7 +118,11 @@ def test_mvp_is_never_piled_on():
         is_worst=False,
         duration_seconds=1800,
     )
-    assert line in TAUNTS["mvp_won"]
+    # Une phrase entiere, sans pique statistique collee derriere : elle doit
+    # etre exactement une ligne de mvp_won ou du lot commun de victoire.
+    from lolbet.services.taunt_lines import GENERIC_WIN
+
+    assert line in set(TAUNTS["mvp_won"]) | set(GENERIC_WIN)
 
 
 def test_no_placeholder_survives_formatting():

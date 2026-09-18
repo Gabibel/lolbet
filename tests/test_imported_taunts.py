@@ -101,11 +101,17 @@ def test_every_pooled_category_exists():
     assert LOSS_POOL_CATEGORIES <= set(TAUNTS)
 
 
-def test_a_praise_category_only_ever_draws_its_own_lines():
+def test_a_praise_category_never_draws_a_loss_line():
+    """Une victoire peut se faire chambrer, mais jamais avec une moquerie
+    de defaite : « les minions ont gagne » serait faux sur un MVP."""
+    from lolbet.services.taunt_lines import GENERIC_WIN
+
     rng = random.Random(0)
-    own = set(TAUNTS["mvp_won"])
-    for _ in range(200):
-        assert _draw("mvp_won", rng) in own
+    allowed = set(TAUNTS["mvp_won"]) | set(GENERIC_WIN)
+    for _ in range(300):
+        line = _draw("mvp_won", rng)
+        assert line in allowed
+        assert line not in set(GENERIC_LOSS)
 
 
 def test_a_loss_category_draws_from_both_sources():

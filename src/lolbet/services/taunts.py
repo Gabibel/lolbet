@@ -21,6 +21,7 @@ from .progression import RankChange
 from .scoring import PlayerScore
 from .taunt_lines import (
     GENERIC_LOSS,
+    GENERIC_WIN,
     JABS,
     LVP_LINES,
     MVP_LINES,
@@ -30,11 +31,13 @@ from .taunt_lines import (
 
 __all__ = [
     "GENERIC_LOSS",
+    "GENERIC_WIN",
     "JABS",
     "LVP_LINES",
     "MVP_LINES",
     "TAUNTS",
     "build_taunt_content",
+    "gif_target",
     "taunt_for",
     "total_lines",
 ]
@@ -66,11 +69,37 @@ LOSS_POOL_CATEGORIES = frozenset(
 # reste la règle, le lot commun apporte la variété.
 GENERIC_SHARE = 0.35
 
+# Situations de victoire. Le lot GENERIC_WIN ne parle que de la victoire
+# elle-même, jamais des statistiques : il est donc vrai pour un MVP comme
+# pour un joueur porté, et peut sortir sur toutes.
+WIN_POOL_CATEGORIES = frozenset(
+    {
+        "mvp_won",
+        "good_won",
+        "bad_won",
+        "fed_won",
+        "worst_won",
+        "deathless_won",
+        "stomp_won",
+        "long_game_won",
+        "streak_won",
+        "first_mvp",
+        "record_kills",
+        "promoted",
+        "lp_surge",
+    }
+)
+# Plus haute que pour les défaites : les phrases spécifiques de victoire
+# sont des compliments, et une victoire doit quand même se faire chambrer.
+GENERIC_WIN_SHARE = 0.6
+
 
 def _draw(category: str, rng: random.Random) -> str:
     """Une phrase de la catégorie, ou du lot commun quand il est éligible."""
     if category in LOSS_POOL_CATEGORIES and rng.random() < GENERIC_SHARE:
         return rng.choice(GENERIC_LOSS)
+    if category in WIN_POOL_CATEGORIES and rng.random() < GENERIC_WIN_SHARE:
+        return rng.choice(GENERIC_WIN)
     return rng.choice(TAUNTS[category])
 
 
@@ -259,6 +288,49 @@ def taunt_for(
         if extra:
             line = f"{line} {extra}"
     return line
+
+
+def gif_target(
+    scores,
+    tracked: dict[str, int],
+    *,
+    forms: dict[str, PlayerForm] | None = None,
+    rank_changes: dict[str, RankChange] | None = None,
+) -> tuple[int, str] | None:
+    """Le joueur suivi dont la situation mérite un GIF, et laquelle.
+
+    Un seul GIF par récap : entre deux joueurs éligibles, la situation la
+    plus marquante l'emporte (série de défaites avant simple feed, etc.).
+    Renvoie None quand aucun joueur suivi n'est dans une situation à GIF —
+    c'est le cas courant, et c'est voulu.
+    """
+    from .gifs import priority_of, situation_for
+
+    mvp_puuid = scores.mvp.puuid if scores.mvp else None
+    worst_puuid = scores.worst.puuid if scores.worst else None
+
+    best: tuple[int, int, str] | None = None
+    for puuid, discord_id in tracked.items():
+        score = scores.by_puuid(puuid)
+        if score is None:
+            continue
+        category = _category(
+            score,
+            is_mvp=puuid == mvp_puuid,
+            is_worst=puuid == worst_puuid,
+            form=(forms or {}).get(puuid),
+            duration_seconds=scores.duration_seconds,
+            rank_change=(rank_changes or {}).get(puuid),
+        )
+        situation = situation_for(category)
+        if situation is None:
+            continue
+        rank = priority_of(category)
+        if best is None or rank < best[0]:
+            best = (rank, discord_id, situation)
+    if best is None:
+        return None
+    return best[1], best[2]
 
 
 def build_taunt_content(

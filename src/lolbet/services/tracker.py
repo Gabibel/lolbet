@@ -56,7 +56,8 @@ from .embeds import (
 )
 from .enrichment import base_card, find_team_id
 from .scoring import is_remake, score_match
-from .taunts import build_taunt_content
+from .gifs import caption_for
+from .taunts import build_taunt_content, gif_target
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..bot import LoLBet
@@ -755,6 +756,14 @@ class GameTracker:
             rank_changes=rank_changes,
         )
         await self._post_followup(game_id, embed, content=taunts)
+        await self._post_gif(
+            game_id,
+            scores,
+            {p.puuid: p.discord_id for p in participants},
+            forms=forms,
+            rank_changes=rank_changes,
+            seed=snapshot[0],
+        )
         await bot.updater.refresh(game_id)
         log.info(
             "tracker.resolved",
@@ -762,6 +771,34 @@ class GameTracker:
             won=winning_team == snapshot[2],
             payouts=settlement.total_paid,
         )
+
+    async def _post_gif(
+        self,
+        game_id: int,
+        scores,
+        tracked: dict[str, int],
+        *,
+        forms,
+        rank_changes,
+        seed: str,
+    ) -> None:
+        """Un GIF sous le récap, seulement si un joueur suivi le mérite."""
+        bot = self._bot
+        if not bot.settings.gifs_enabled:
+            return
+        target = gif_target(scores, tracked, forms=forms, rank_changes=rank_changes)
+        if target is None:
+            return
+        discord_id, situation = target
+        rng = random.Random(f"{seed}:gif")
+        url = await bot.gifs.pick(situation, rng)
+        if not url:
+            return
+        embed = discord.Embed(colour=discord.Colour(0x2B2D31))
+        embed.set_image(url=url)
+        content = caption_for(situation, f"<@{discord_id}>", rng)
+        await self._post_followup(game_id, embed, content=content)
+        log.info("tracker.gif", game=seed, situation=situation)
 
     async def _settle_remake(self, game_id: int) -> None:
         """Rembourse tout le monde et n'enregistre aucune statistique."""

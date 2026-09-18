@@ -455,6 +455,28 @@ message that says *why* — "Riot refuses to serve this mode" reads differently
 from "the match never appeared". Before this, an API error skipped the
 countdown entirely and was retried every ten seconds forever, silently.
 
+### Winners get mocked too, and some games get a GIF
+
+A clean win used to earn a compliment. It now draws, 60% of the time, from a
+pool of forty lines that mock the *win* — its rarity, its fragility, what it
+will do to the player's ego — and never the stats. That distinction is what
+lets the same pool fire on an MVP and on a player who got carried without
+lying to either of them: "Riot has already opened an investigation" is true
+of every victory. A test forbids any line in that pool from mentioning
+deaths, kills, CS, KDA or being carried.
+
+Six situations also earn a GIF under the recap: a losing streak, ten or more
+deaths, worst player in a loss, a lost division, a win despite playing badly,
+a winning streak. One GIF per recap, for the most notable tracked player —
+a streak outranks a feed. Ordinary games get none, on purpose.
+
+The GIFs come from [`gif_lines.py`](src/lolbet/services/gif_lines.py), a
+data file meant to be edited with your own: open a GIF on Tenor, right-click
+→ copy image address. Every starter URL was verified the day it was added.
+With `LOLBET_TENOR_API_KEY` set (a free Google Cloud key, no billing), the
+bot also searches Tenor once an hour per situation and mixes the results
+into the curated list; a Tenor outage falls back to the list silently.
+
 ### Overwatch: rank tracking, and why there is nothing more
 
 Blizzard has never published an Overwatch API. Their developer platform covers
@@ -574,6 +596,8 @@ knowing:
 | `LOLBET_BACKUP_ENABLED` | `true` | Daily SQLite snapshot into `data/backups/` |
 | `LOLBET_BACKUP_KEEP` | `7` | How many daily snapshots to keep |
 | `LOLBET_ALERT_BAD_KEY` | `true` | Post in Discord when the Riot key is refused |
+| `LOLBET_GIFS_ENABLED` | `true` | GIF under the recap on notable situations |
+| `LOLBET_TENOR_API_KEY` | unset | Free Google key; adds Tenor search to the curated list |
 | `LOLBET_DIGEST_ENABLED` | `true` | Weekly round-up |
 | `LOLBET_DIGEST_WEEKDAY` | `6` | 0 = Monday, 6 = Sunday |
 | `LOLBET_DIGEST_HOUR` | `20` | Hour, in `LOLBET_DIGEST_TIMEZONE` |
@@ -667,6 +691,8 @@ src/lolbet/
     betting.py         parimutuel pool + wallets
     scoring.py         MVP / worst player
     taunts.py          fin-de-partie banter, history-aware
+    gifs.py            which situation earns a GIF, and where it comes from
+    gif_lines.py       the curated GIF list, meant to be edited
     history.py         frozen per-game stats, form and streaks
     progression.py     rank snapshots and LP movement
     seasons.py         season lifecycle and frozen standings

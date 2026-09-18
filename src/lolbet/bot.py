@@ -15,6 +15,7 @@ from .overwatch.client import OverFastClient
 from .riot.ratelimit import build_default_limiter
 from .services.betting import BettingService
 from .services.digest_tracker import DigestScheduler
+from .services.gifs import GifPicker
 from .services.messages import MessageUpdater
 from .services.props import PropService
 from .services.ow_tracker import OverwatchTracker
@@ -64,6 +65,7 @@ class LoLBet(commands.Bot):
 
         self.betting = BettingService(settings)
         self.props = PropService(settings, self.betting)
+        self.gifs = GifPicker(settings.tenor_api_key)
         self.updater = MessageUpdater(self)
         self.tracker = GameTracker(self)
         self.ow_tracker = OverwatchTracker(self)
@@ -146,6 +148,7 @@ class LoLBet(commands.Bot):
         await self.updater.close()
         await self.riot.aclose()
         await self.overfast.aclose()
+        await self.gifs.aclose()
         await self.ddragon.aclose()
         await super().close()
         await self.engine.dispose()

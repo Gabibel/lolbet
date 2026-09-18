@@ -102,6 +102,13 @@ class Settings(BaseSettings):
     alert_bad_key: bool = True
     alert_cooldown_hours: int = Field(default=6, ge=1)
 
+    # GIF dans le recap, sur les situations qui le meritent (serie de
+    # defaites, gros feed, pire joueur, retrogradation, victoire portee,
+    # serie de victoires). La liste curee de gif_lines.py suffit ; une cle
+    # Tenor (Google Cloud, gratuite) ajoute de la variete.
+    gifs_enabled: bool = True
+    tenor_api_key: str | None = None
+
     # Bilan hebdomadaire : le seul moment ou le bot parle sans qu'une
     # partie vienne de se terminer.
     digest_enabled: bool = True
